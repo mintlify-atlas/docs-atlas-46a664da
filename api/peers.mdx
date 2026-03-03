@@ -95,7 +95,7 @@ Returns a `Result` indicating success or failure. Returns an error if the addres
 use tashi_vertex::{Peers, KeyPublic, PeerCapabilities};
 
 let mut peers = Peers::new()?;
-let peer_key = KeyPublic::from_bytes(&key_bytes)?;
+let peer_key: KeyPublic = "BASE58_PUBLIC_KEY".parse()?;
 
 let capabilities = PeerCapabilities {
     no_order: false,
