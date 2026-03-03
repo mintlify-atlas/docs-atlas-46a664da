@@ -1,0 +1,147 @@
+---
+title: Transaction
+description: Allocate and send transactions to the Tashi Vertex consensus network
+---
+
+## Overview
+
+The `Transaction` struct represents a transaction that can be sent to the Tashi Vertex consensus network. Transactions must be allocated using `Transaction::allocate()`, populated with data, and then sent via an `Engine`.
+
+<Note>
+The `Transaction` struct is marked with `#[must_use]`, which means the compiler will warn you if you allocate a transaction but don't send it. This helps prevent resource leaks.
+</Note>
+
+## Methods
+
+### allocate
+
+Allocates a buffer for a transaction of the specified size.
+
+```rust
+pub fn allocate(size: usize) -> Self
+```
+
+<ParamField path="size" type="usize" required>
+  The size in bytes of the transaction buffer to allocate
+</ParamField>
+
+**Returns:** A new `Transaction` with an allocated buffer of the specified size.
+
+```rust
+use tashi_vertex::Transaction;
+
+// Allocate a 256-byte transaction buffer
+let mut transaction = Transaction::allocate(256);
+```
+
+<Info>
+The transaction buffer is allocated by the Tashi Vertex library and optimized for efficient transmission to the network.
+</Info>
+
+## Populating transaction data
+
+The `Transaction` struct implements `Deref<Target = [u8]>` and `DerefMut`, which means you can treat it as a mutable byte slice:
+
+```rust
+use tashi_vertex::Transaction;
+
+let mut transaction = Transaction::allocate(32);
+
+// Write data directly to the transaction buffer
+transaction[0] = 0x01;
+transaction[1] = 0x02;
+
+// Or use slice methods
+transaction[0..4].copy_from_slice(&[0x01, 0x02, 0x03, 0x04]);
+
+// Or serialize structured data
+let data = MyData { /* ... */ };
+let serialized = bincode::serialize(&data)?;
+transaction.copy_from_slice(&serialized);
+```
+
+## Sending transactions
+
+Transactions are sent to the network using the [`Engine::send_transaction()`](/api/engine) method:
+
+```rust
+use tashi_vertex::{Engine, Transaction};
+
+let mut transaction = Transaction::allocate(64);
+
+// Populate transaction with your data
+transaction[0..8].copy_from_slice(&42u64.to_le_bytes());
+transaction[8..16].copy_from_slice(&123u64.to_le_bytes());
+
+// Send to the network
+engine.send_transaction(transaction)?;
+```
+
+<Note>
+The `Transaction::send()` method is internal and not exposed in the public API. Use `Engine::send_transaction()` instead to send transactions.
+</Note>
+
+## Complete example
+
+Here's a complete example showing how to serialize data, allocate a transaction, and send it:
+
+```rust
+use tashi_vertex::{Engine, Transaction};
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+struct TransferData {
+    from: String,
+    to: String,
+    amount: u64,
+}
+
+async fn send_transfer(
+    engine: &Engine,
+    from: String,
+    to: String,
+    amount: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create the data to send
+    let data = TransferData { from, to, amount };
+    
+    // Serialize to bytes
+    let bytes = bincode::serialize(&data)?;
+    
+    // Allocate a transaction buffer
+    let mut transaction = Transaction::allocate(bytes.len());
+    
+    // Copy data into the transaction
+    transaction.copy_from_slice(&bytes);
+    
+    // Send to the network
+    engine.send_transaction(transaction)?;
+    
+    Ok(())
+}
+```
+
+## Memory management
+
+<Info>
+Transactions use special memory management:
+
+- When allocated, the buffer is managed by the Tashi Vertex library
+- When sent via `send_transaction()`, ownership is transferred and the buffer is automatically freed
+- If a transaction is allocated but not sent, it should be freed (note: the current implementation has a TODO to add a `Drop` implementation for this)
+</Info>
+
+## Size considerations
+
+When allocating transactions, consider:
+
+- **Network efficiency**: Smaller transactions propagate faster through the network
+- **Event capacity**: Multiple transactions are batched into events
+- **Serialization overhead**: Account for serialization format overhead when calculating size
+
+```rust
+// Calculate exact size needed
+let data = MyData { /* ... */ };
+let serialized = bincode::serialize(&data)?;
+let transaction = Transaction::allocate(serialized.len());
+```

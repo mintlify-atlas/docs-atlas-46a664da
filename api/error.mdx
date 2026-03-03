@@ -1,0 +1,220 @@
+---
+title: "Error handling"
+description: "Error types and result handling in the Tashi Vertex Rust SDK"
+---
+
+## Overview
+
+The Tashi Vertex SDK defines a custom error type and result alias for consistent error handling across the library. All SDK operations that can fail return a `Result<T>` which wraps either a success value or an `Error`.
+
+## Result type alias
+
+```rust
+pub type Result<T> = std::result::Result<T, Error>;
+```
+
+The `Result<T>` type alias is a convenience wrapper around Rust's standard `Result` type, pre-configured to use the SDK's `Error` type for failures. This allows SDK functions to return results without repeatedly specifying the error type.
+
+## Error variants
+
+The `Error` enum represents all possible error conditions in the SDK:
+
+### Argument
+
+An argument provided to a function was invalid.
+
+```rust
+Error::Argument
+```
+
+This error occurs when a function receives a parameter that doesn't meet validation requirements, such as an out-of-range value or incorrectly formatted data.
+
+### ArgumentNull
+
+A required argument provided to a function was NULL.
+
+```rust
+Error::ArgumentNull
+```
+
+This error is specific to FFI boundaries where null pointers may be passed from C code. In pure Rust code, this is prevented by the type system.
+
+### KeyFromDer
+
+Failed to parse a key from DER format.
+
+```rust
+Error::KeyFromDer
+```
+
+This error occurs when attempting to deserialize a cryptographic key from DER-encoded bytes and the parsing fails due to invalid format or corrupted data.
+
+### Context
+
+Failed to initialize a new Context.
+
+```rust
+Error::Context
+```
+
+This error indicates that SDK context initialization failed, which may occur due to resource constraints or invalid configuration.
+
+### BufferTooSmall
+
+A provided buffer was too small to hold the required data.
+
+```rust
+Error::BufferTooSmall
+```
+
+This error occurs when an output buffer doesn't have sufficient capacity for the data being written to it. The caller should provide a larger buffer and retry the operation.
+
+### Base58Decode
+
+Failed to decode a Base58 string.
+
+```rust
+Error::Base58Decode
+```
+
+This error occurs when attempting to decode a Base58-encoded string and the input contains invalid characters or is malformed.
+
+### SocketBind
+
+Failed to bind a socket.
+
+```rust
+Error::SocketBind
+```
+
+This error indicates that a socket binding operation failed, typically due to the port already being in use or insufficient permissions.
+
+## Error handling patterns
+
+### Basic error handling
+
+Handle errors using standard Rust pattern matching:
+
+```rust
+use tashi_vertex::{Context, Result};
+
+fn initialize_context() -> Result<()> {
+    match Context::new() {
+        Ok(context) => {
+            // Use the context
+            Ok(())
+        }
+        Err(Error::Context) => {
+            eprintln!("Failed to initialize context");
+            Err(Error::Context)
+        }
+        Err(e) => Err(e),
+    }
+}
+```
+
+### Using the question mark operator
+
+The `Result` type works seamlessly with Rust's `?` operator for error propagation:
+
+```rust
+use tashi_vertex::{Context, Result};
+
+fn setup_sdk() -> Result<Context> {
+    let context = Context::new()?;
+    // If Context::new() returns an error, it's automatically propagated
+    Ok(context)
+}
+```
+
+### Handling specific error variants
+
+Match on specific error variants when different errors require different handling:
+
+```rust
+use tashi_vertex::{decode_key, Error, Result};
+
+fn load_key(data: &[u8]) -> Result<()> {
+    match decode_key(data) {
+        Ok(key) => {
+            println!("Key loaded successfully");
+            Ok(())
+        }
+        Err(Error::KeyFromDer) => {
+            eprintln!("Invalid key format");
+            Err(Error::KeyFromDer)
+        }
+        Err(Error::BufferTooSmall) => {
+            eprintln!("Buffer too small, retrying with larger buffer");
+            // Retry logic here
+            Err(Error::BufferTooSmall)
+        }
+        Err(e) => Err(e),
+    }
+}
+```
+
+## FFI error propagation
+
+<Note>
+The SDK uses an internal `TVResult` enum for error propagation across the FFI boundary between Rust and C code.
+</Note>
+
+The SDK translates between C-style integer error codes (`TVResult`) and Rust's type-safe `Error` enum:
+
+```rust
+// Internal FFI result type (C-compatible)
+#[repr(C)]
+enum TVResult {
+    Ok = 0,
+    Argument = -1,
+    ArgumentNull = -2,
+    KeyFromDer = -3,
+    Context = -4,
+    BufferTooSmall = -5,
+    Base58Decode = -6,
+    SocketBind = -7,
+}
+```
+
+When calling FFI functions, the SDK automatically converts `TVResult` codes into `Result<T, Error>`:
+
+```rust
+// Internal conversion from FFI result to Rust Result
+TVResult::Ok.ok_with(value)      // Ok(value)
+TVResult::Argument.ok()          // Err(Error::Argument)
+TVResult::KeyFromDer.ok()        // Err(Error::KeyFromDer)
+```
+
+<Info>
+SDK users don't need to interact with `TVResult` directly - it's used internally for FFI interop. All public APIs use the `Result<T>` type.
+</Info>
+
+## Error trait implementations
+
+The `Error` type implements standard Rust error traits:
+
+- **`std::error::Error`**: Provides the `description()` method for error messages
+- **`Display`**: Enables formatting errors with `format!()` and `println!()`
+- **`Debug`**: Supports debug formatting with `{:?}`
+- **`Clone` and `Copy`**: Errors can be cheaply copied
+- **`PartialEq` and `Eq`**: Errors can be compared for equality
+
+Example using error traits:
+
+```rust
+use tashi_vertex::{Context, Error};
+
+fn print_error(e: Error) {
+    // Using Display trait
+    println!("Error: {}", e);
+    
+    // Using Debug trait
+    println!("Debug: {:?}", e);
+    
+    // Comparing errors
+    if e == Error::Context {
+        println!("This is a context initialization error");
+    }
+}
+```

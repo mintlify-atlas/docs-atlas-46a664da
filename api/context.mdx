@@ -1,0 +1,40 @@
+---
+title: Context
+description: Main context handle for Tashi Vertex operations
+---
+
+The `Context` represents the main context for Tashi Vertex and must be initialized before using most other functions. This opaque handle encapsulates internal state and configuration required for operations.
+
+## Constructor
+
+### new
+
+Initialize a new context for Tashi Vertex.
+
+```rust
+pub fn new() -> crate::Result<Self>
+```
+
+#### Returns
+
+<ParamField body="return" type="Result<Context>">
+  Returns a new `Context` instance on success, or an `Error` if initialization fails.
+</ParamField>
+
+#### Example
+
+```rust
+use tashi_vertex::Context;
+
+let context = Context::new()?;
+```
+
+<Note>
+  The context must be initialized before creating sockets or starting the engine. All Tashi Vertex operations require a valid context.
+</Note>
+
+## Related types
+
+- [Engine](/api/engine) - Requires a `Context` to start the consensus engine
+- [Socket](/api/socket) - Requires a `Context` to bind to an address
+- [Error](/api/error) - Possible error types returned by `Context::new()`

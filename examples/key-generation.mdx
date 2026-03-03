@@ -1,0 +1,149 @@
+---
+title: Key generation
+description: Learn how to generate cryptographic keys for signing transactions in Tashi Vertex
+---
+
+This example demonstrates how to generate new cryptographic key pairs for use in a Tashi Vertex node. Each node requires a secret key to sign transactions and participate in the network.
+
+## Overview
+
+The `key-generate` example shows the simplest way to create a new key pair:
+- Generate a random secret key using `KeySecret::generate()`
+- Derive the corresponding public key
+- Display both keys in Base58-encoded format
+
+## Complete example
+
+```rust examples/key-generate.rs
+use tashi_vertex::KeySecret;
+
+fn main() {
+    // generate a new secret key to use for this node when signing transactions
+    let secret = KeySecret::generate();
+    let public = secret.public();
+
+    println!("Secret: {secret}");
+    println!("Public: {public}");
+}
+```
+
+## How it works
+
+<Steps>
+  <Step title="Generate secret key">
+    Call `KeySecret::generate()` to create a new random secret key. This key will be used to sign all transactions from your node.
+
+    ```rust
+    let secret = KeySecret::generate();
+    ```
+  </Step>
+
+  <Step title="Derive public key">
+    Extract the public key from the secret key using the `public()` method. This public key identifies your node to other peers.
+
+    ```rust
+    let public = secret.public();
+    ```
+  </Step>
+
+  <Step title="Display keys">
+    Both keys implement `Display` and are automatically encoded in Base58 format when printed.
+
+    ```rust
+    println!("Secret: {secret}");
+    println!("Public: {public}");
+    ```
+  </Step>
+</Steps>
+
+## Example output
+
+When you run this example, you'll see output similar to:
+
+```bash
+Secret: 3yZe7d2vK9mN8pQ5rT6wX2aB4cD1eF7gH9jK3mN6pQ8rS5tV7wY9zA2bC4dE6fG
+Public: 7wY9zA2bC4dE6fG8hJ1kL3mN5pQ7rS9tV2wX4yZ6aB8cD1eF3gH5jK7mN9pQ2rS
+```
+
+<Note>
+  Each time you run the example, you'll get a different key pair. Store your secret key securely - it cannot be recovered if lost.
+</Note>
+
+## Parsing existing keys
+
+If you already have a key and want to parse it, use the `key-parse` example:
+
+```rust examples/key-parse.rs
+use clap::Parser;
+use tashi_vertex::{KeyPublic, KeySecret};
+
+#[derive(Parser)]
+struct Args {
+    #[clap(long)]
+    secret: Option<String>,
+
+    #[clap(long)]
+    public: Option<String>,
+}
+
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
+    if let Some(secret) = args.secret {
+        // Decode and parse the secret key from DER encoded Base58 string
+        let secret: KeySecret = secret.parse()?;
+        let public = secret.public();
+
+        println!("Secret: {secret}");
+        println!("Public: {public}");
+    } else if let Some(public) = args.public {
+        let public: KeyPublic = public.parse()?;
+
+        println!("Public: {public}");
+    } else {
+        println!("Usage: key-parse --secret KEY\n");
+        println!("   or: key-parse --public KEY\n");
+    }
+
+    Ok(())
+}
+```
+
+### Usage
+
+<Tabs>
+  <Tab title="Parse secret key">
+    ```bash
+    cargo run --example key-parse -- --secret "3yZe7d2vK9mN8pQ5rT6wX2aB4cD1eF7gH9jK3mN6pQ8rS5tV7wY9zA2bC4dE6fG"
+    ```
+
+    This will parse the secret key and display both the secret and derived public key.
+  </Tab>
+
+  <Tab title="Parse public key">
+    ```bash
+    cargo run --example key-parse -- --public "7wY9zA2bC4dE6fG8hJ1kL3mN5pQ7rS9tV2wX4yZ6aB8cD1eF3gH5jK7mN9pQ2rS"
+    ```
+
+    This will parse and validate the public key format.
+  </Tab>
+</Tabs>
+
+## Key format
+
+Both `KeySecret` and `KeyPublic` types:
+- Are encoded in Base58 format when displayed or serialized
+- Can be parsed from Base58 strings using the `parse()` method
+- Use DER encoding internally
+- Implement standard traits like `Display`, `FromStr`, and `Debug`
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Pingback network" href="/examples/pingback-network">
+    Use your keys to participate in a network
+  </Card>
+  <Card title="Transaction handling" href="/examples/transaction-handling">
+    Learn how to send and receive transactions
+  </Card>
+</CardGroup>

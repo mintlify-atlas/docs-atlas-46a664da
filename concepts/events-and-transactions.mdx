@@ -1,0 +1,444 @@
+---
+title: Events and transactions
+description: How to send transactions and receive consensus-ordered events in Tashi Vertex
+---
+
+Tashi Vertex achieves consensus by ordering **events** that contain **transactions**. Understanding the relationship between these two concepts is essential for building applications.
+
+## Transactions
+
+A **transaction** is a unit of data that you submit to the network. It can represent anything your application needs:
+- State transitions (account transfers, updates)
+- Commands or operations
+- Arbitrary application data
+- Binary payloads
+
+### Creating transactions
+
+Transactions are allocated as byte buffers:
+
+```rust
+use tashi_vertex::Transaction;
+
+// Allocate a transaction buffer
+let mut tx = Transaction::allocate(data.len());
+
+// Copy your data into it
+tx.copy_from_slice(b"hello world");
+
+// Or write directly:
+tx[0] = 0x01;
+tx[1] = 0x02;
+```
+
+<Note>
+The `Transaction` type implements `Deref<Target=[u8]>` and `DerefMut`, so you can treat it like a byte slice.
+</Note>
+
+### Sending transactions
+
+Submit transactions to the network through the Engine:
+
+```rust
+engine.send_transaction(tx)?;
+```
+
+Once sent:
+1. The transaction enters the local transaction buffer
+2. The engine includes it in the next event it creates
+3. The event propagates through gossip to other nodes
+4. Eventually, the event (and your transaction) reaches consensus
+
+<Warning>
+The `Transaction` is consumed by `send_transaction()`. You cannot reuse it after sending.
+</Warning>
+
+### Transaction lifecycle
+
+```
+┌──────────────────┐
+│  Your App        │
+│  Creates tx      │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Engine          │
+│  Buffers tx      │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Local Event     │
+│  Contains tx     │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Gossip          │
+│  Spreads event   │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  Consensus       │
+│  Orders event    │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  All Nodes       │
+│  Receive tx      │
+└──────────────────┘
+```
+
+### Buffer management
+
+The engine provides backpressure when the transaction buffer is full:
+
+```rust
+let mut options = Options::default();
+
+// Maximum buffered transactions before backpressure
+options.set_transaction_channel_size(32);
+
+// Maximum unacknowledged bytes (default: 500 MiB)
+options.set_max_unacknowledged_bytes(500 * 1024 * 1024);
+```
+
+When limits are reached:
+- `send_transaction()` may block briefly
+- The engine waits for transactions to reach consensus
+- Buffer space is freed as events are acknowledged
+
+<Tip>
+Adjust these parameters based on your transaction rate and network latency to optimize throughput.
+</Tip>
+
+## Events
+
+An **event** is a consensus-ordered container that carries transactions. Events are the fundamental unit of the Hashgraph DAG.
+
+### Event properties
+
+Each event has:
+
+```rust
+let event: Event = /* from consensus */;
+
+// Cryptographic hash uniquely identifying this event
+let hash: &[u8; 32] = event.hash();
+
+// Public key of the node that created it
+let creator: &KeyPublic = event.creator();
+
+// When the creator made this event (nanoseconds)
+let created_at: u64 = event.created_at();
+
+// When consensus was reached (nanoseconds)
+let consensus_at: u64 = event.consensus_at();
+
+// Consensus-driven randomness
+let random_seed: &[u8] = event.whitened_signature();
+```
+
+<Info>
+Timestamps are in nanoseconds since the Unix epoch. The `consensus_at` timestamp is agreed upon by all honest nodes.
+</Info>
+
+### Event creation
+
+You don't create events directly. The engine automatically creates them:
+
+**When transactions are pending:**
+- The engine bundles pending transactions into an event
+- Creates it as soon as possible (respecting min event interval)
+
+**When idle (no transactions):**
+- The engine creates empty events at the heartbeat interval (default: 500ms)
+- Keeps the network alive and advances consensus
+
+```rust
+let mut options = Options::default();
+options.set_heartbeat_us(500_000); // 500ms heartbeat
+```
+
+### Event structure
+
+Internal structure of an event:
+
+```rust
+// Simplified representation
+struct Event {
+    creator: KeyPublic,           // Who created it
+    signature: [u8; 64],          // Ed25519 signature
+    created_at: u64,              // Creation timestamp
+    consensus_at: u64,            // Consensus timestamp
+    hash: [u8; 32],               // Cryptographic hash
+    transactions: Vec<Vec<u8>>,   // Zero or more transactions
+    self_parent: [u8; 32],        // Previous event by same creator
+    other_parent: Option<[u8; 32]>, // Event from another creator
+}
+```
+
+The parent references create the DAG structure used for consensus.
+
+## Receiving messages
+
+The engine delivers two types of messages through `recv_message()`:
+
+```rust
+use tashi_vertex::Message;
+
+while let Some(message) = engine.recv_message().await? {
+    match message {
+        Message::Event(event) => {
+            // Process consensus-ordered event
+        }
+        Message::SyncPoint(sync_point) => {
+            // Handle session management
+        }
+    }
+}
+```
+
+### Message::Event
+
+An `Event` message contains transactions that have reached consensus:
+
+```rust
+Message::Event(event) => {
+    println!("Event from: {}", event.creator());
+    println!("Consensus timestamp: {}", event.consensus_at());
+    
+    // Iterate over transactions
+    for tx in event.transactions() {
+        println!("Transaction: {} bytes", tx.len());
+        process_transaction(tx);
+    }
+}
+```
+
+#### Accessing transactions
+
+Multiple ways to access transactions in an event:
+
+```rust
+// Count transactions
+let count = event.transaction_count();
+
+// Access by index
+if let Some(tx) = event.transaction(0) {
+    println!("First transaction: {:?}", tx);
+}
+
+// Iterate all transactions
+for tx in event.transactions() {
+    // tx is &[u8]
+    process_transaction(tx);
+}
+```
+
+<Note>
+The iterator yields `&[u8]` slices — references to the transaction data owned by the event.
+</Note>
+
+### Message::SyncPoint
+
+A `SyncPoint` represents session management decisions:
+
+```rust
+Message::SyncPoint(sync_point) => {
+    // Network has reached a synchronization point
+    // Typically indicates:
+    // - New node joined
+    // - Node left/removed
+    // - Epoch transition
+    
+    handle_sync_point(sync_point);
+}
+```
+
+Sync points mark boundaries in consensus where network membership may have changed.
+
+<Accordion title="When sync points occur">
+- **Node joining**: A new peer is added to the network
+- **Node leaving**: A peer is removed (voluntarily or kicked)
+- **Epoch transition**: End of an epoch period
+- **State transfer**: When state sharing is enabled
+
+Most applications can safely ignore sync points, but they're useful for:
+- Tracking network membership changes
+- Implementing checkpointing
+- Coordinating application-level state transitions
+</Accordion>
+
+## Ordering guarantees
+
+Tashi Vertex provides strong ordering guarantees:
+
+### Total order
+
+All events (and their transactions) are ordered in a single, global sequence:
+- Every node receives events in the **same order**
+- Order is determined by consensus timestamps
+- Order is **final and immutable** once reached
+
+### Causality
+
+If event A happens before event B in real time (causally):
+- A's consensus timestamp will be less than B's
+- All nodes will see A before B
+
+### Fairness
+
+Transactions are ordered fairly:
+- No single node can manipulate ordering
+- Timestamps are based on median of witness timestamps
+- Byzantine nodes cannot bias the order significantly
+
+<Warning>
+Transactions from the **same node** are guaranteed to be ordered as sent. Transactions from **different nodes** are ordered by consensus, which may not match the submission order.
+</Warning>
+
+## Processing transactions
+
+Typical pattern for handling consensus-ordered transactions:
+
+```rust
+use tashi_vertex::{Engine, Message};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let engine = /* ... initialize engine ... */;
+    
+    // Send some transactions
+    let tx1 = Transaction::allocate(4);
+    tx1.copy_from_slice(b"msg1");
+    engine.send_transaction(tx1)?;
+    
+    // Receive consensus-ordered events
+    while let Some(message) = engine.recv_message().await? {
+        match message {
+            Message::Event(event) => {
+                for tx in event.transactions() {
+                    apply_to_state(tx);
+                }
+            }
+            Message::SyncPoint(_) => {
+                // Optional: handle network changes
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+fn apply_to_state(tx: &[u8]) {
+    // Parse transaction format
+    // Validate transaction
+    // Apply state changes
+    // Emit results/logs
+}
+```
+
+<Tip>
+Keep transaction processing fast. Slow processing can create a bottleneck since events arrive in order and can't be processed in parallel without careful design.
+</Tip>
+
+## Deterministic execution
+
+Because all nodes receive events in the same order, state machines remain synchronized:
+
+```rust
+struct AppState {
+    accounts: HashMap<AccountId, Balance>,
+}
+
+impl AppState {
+    fn apply_transaction(&mut self, tx: &[u8]) {
+        // Parse transaction
+        let cmd = parse_transaction(tx);
+        
+        // Apply deterministically
+        match cmd {
+            Command::Transfer { from, to, amount } => {
+                // All nodes execute the same logic
+                // in the same order
+                self.accounts.entry(from).and_modify(|b| *b -= amount);
+                self.accounts.entry(to).and_modify(|b| *b += amount);
+            }
+        }
+    }
+}
+```
+
+<Info>
+Use `event.whitened_signature()` as a source of consensus-agreed randomness for deterministic random decisions.
+</Info>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Keep transactions small" icon="minimize">
+    Smaller transactions improve throughput and reduce latency
+  </Card>
+  <Card title="Use efficient encoding" icon="file-zipper">
+    Use binary formats (Protobuf, bincode) instead of JSON
+  </Card>
+  <Card title="Process quickly" icon="gauge-high">
+    Fast transaction processing prevents backlog
+  </Card>
+  <Card title="Handle errors gracefully" icon="shield-check">
+    Invalid transactions should be logged but not crash the node
+  </Card>
+</CardGroup>
+
+### Transaction design patterns
+
+**Idempotency:**
+```rust
+// Include unique ID to detect duplicates
+struct Transaction {
+    id: [u8; 32],        // Unique transaction ID
+    nonce: u64,          // Sequence number
+    payload: Vec<u8>,    // Actual data
+}
+```
+
+**Batching:**
+```rust
+// Combine multiple operations
+let mut batch = Vec::new();
+for item in items {
+    batch.extend_from_slice(&item.encode());
+}
+let tx = Transaction::allocate(batch.len());
+tx.copy_from_slice(&batch);
+engine.send_transaction(tx)?;
+```
+
+**Validation:**
+```rust
+for tx in event.transactions() {
+    match validate_transaction(tx) {
+        Ok(cmd) => state.apply(cmd),
+        Err(e) => {
+            // Log but continue processing
+            eprintln!("Invalid tx: {}", e);
+            continue;
+        }
+    }
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Build your first Tashi Vertex application
+  </Card>
+  <Card title="API reference" icon="code" href="/api/engine">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>

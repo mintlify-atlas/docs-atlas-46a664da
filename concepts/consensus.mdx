@@ -1,0 +1,169 @@
+---
+title: Consensus
+description: Understanding Tashi Vertex's Hashgraph-based Byzantine fault-tolerant consensus protocol
+---
+
+Tashi Vertex implements a Byzantine fault-tolerant (BFT) consensus engine based on the [Hashgraph algorithm](https://hedera.com/hh-ieee_coins_paper-200516.pdf). It uses a DAG (Directed Acyclic Graph) of cryptographically signed events and virtual voting to achieve consensus finality in under 100 milliseconds without exchanging explicit vote messages.
+
+## Hashgraph consensus
+
+Unlike traditional blockchain consensus mechanisms that require explicit voting rounds, Hashgraph uses a gossip protocol combined with virtual voting to reach agreement on transaction ordering.
+
+### Key characteristics
+
+<CardGroup cols={2}>
+  <Card title="Sub-100ms finality" icon="bolt">
+    Events reach consensus finality in under 100 milliseconds, enabling high-throughput, low-latency applications.
+  </Card>
+  <Card title="No explicit voting" icon="check">
+    Nodes achieve consensus through virtual voting derived from the gossip graph, eliminating vote message overhead.
+  </Card>
+  <Card title="Byzantine fault tolerance" icon="shield">
+    Tolerates up to f = ⌊(n-1)/3⌋ Byzantine (malicious or faulty) participants in a network of n nodes.
+  </Card>
+  <Card title="Fair ordering" icon="scale-balanced">
+    Transactions are ordered fairly based on cryptographic timestamps, preventing manipulation.
+  </Card>
+</CardGroup>
+
+## DAG structure
+
+Tashi Vertex builds a Directed Acyclic Graph (DAG) where each node in the graph represents an **event**. Events are connected through cryptographic hashes that reference previous events, creating an immutable history.
+
+```rust
+// Events contain:
+// - Transactions submitted by the creator
+// - References to parent events (gossip history)
+// - Cryptographic signature from the creator
+// - Timestamp information
+```
+
+### Event creation
+
+Each peer in the network creates events that:
+- Contain zero or more transactions
+- Reference previous events from the same creator (self-parent)
+- Reference events from other creators learned through gossip (other-parent)
+- Are cryptographically signed by the creator's private key
+
+<Note>
+The DAG grows as nodes gossip with each other, sharing new events and learning about events created by other nodes.
+</Note>
+
+## Virtual voting
+
+Hashgraph's breakthrough innovation is **virtual voting** — a technique that allows nodes to determine how other nodes would vote without actually exchanging vote messages.
+
+### How it works
+
+1. **Gossip about gossip**: When nodes exchange events, they also implicitly share information about what events they've seen and when
+2. **Strongly seeing**: An event "strongly sees" an earlier event if it can reach it through multiple independent paths in the DAG
+3. **Famous witnesses**: Special events called "witnesses" that start new rounds become "famous" when they're strongly seen by a supermajority
+4. **Consensus timestamp**: Once enough famous witnesses agree on an event's position, it receives a consensus timestamp
+
+<Tip>
+Because all nodes have the same DAG structure and use the same deterministic algorithm, they all independently calculate the same consensus order.
+</Tip>
+
+## Byzantine fault tolerance
+
+Tashi Vertex can tolerate up to **f = ⌊(n-1)/3⌋** Byzantine participants, where:
+- **n** = total number of nodes in the network
+- **f** = maximum number of faulty/malicious nodes
+
+For example:
+- A 4-node network can tolerate 1 Byzantine node
+- A 7-node network can tolerate 2 Byzantine nodes
+- A 10-node network can tolerate 3 Byzantine nodes
+
+### Byzantine behavior
+
+The protocol tolerates nodes that:
+- Send different information to different peers
+- Stop responding or crash unexpectedly
+- Attempt to manipulate transaction ordering
+- Create invalid signatures or events
+
+<Warning>
+If more than f nodes act maliciously, the network's safety guarantees may be violated. Always ensure your network has sufficient honest nodes.
+</Warning>
+
+## Consensus finality
+
+### Finality guarantees
+
+Once an event reaches consensus:
+- Its position in the total order is **final and immutable**
+- All honest nodes will agree on the same consensus timestamp
+- The event's transactions are committed and can be applied to state
+
+### Performance characteristics
+
+```rust
+let options = Options::default();
+// Heartbeat: 500ms (keep-alive when idle)
+// Sub-100ms finality under normal network conditions
+```
+
+The consensus engine uses several configurable parameters to optimize performance:
+
+<Accordion title="Configurable timing parameters">
+- **Heartbeat interval**: Creates empty events when idle (default: 500ms)
+- **Target ACK latency**: Threshold for throughput increase (default: 400ms)
+- **Max ACK latency**: Threshold for throughput reduction (default: 600ms)
+- **Dynamic epoch sizing**: Automatically adjusts epoch length (1-3 seconds)
+
+See the [Configuration guide](/guides/configuration) for details.
+</Accordion>
+
+## Rounds and epochs
+
+### Rounds
+
+The consensus algorithm divides time into **rounds**. Each round:
+- Starts with "witness" events created by each node
+- Determines which witnesses become "famous" through virtual voting
+- Advances when enough nodes have created events in the current round
+
+### Epochs
+
+An **epoch** is a longer period spanning multiple rounds. Epochs are used for:
+- **Address book changes**: Adding or removing nodes from the network
+- **State synchronization**: Helping fallen-behind nodes catch up
+- **Network reconfiguration**: Adjusting consensus parameters
+
+<Info>
+With dynamic epoch sizing enabled, Tashi Vertex automatically keeps epoch lengths between 1-3 seconds based on network conditions.
+</Info>
+
+## Whitened signatures
+
+Each consensus event includes a **whitened signature** — a value created by XORing the event's signature with the signatures of all unique famous witnesses that voted on it.
+
+```rust
+let event: Event = /* received from consensus */;
+let whitened_sig = event.whitened_signature();
+
+// Use as a consensus-driven random seed
+// All nodes calculate the same value deterministically
+```
+
+This value is:
+- **Unpredictable**: Cannot be known until consensus is reached
+- **Deterministic**: All honest nodes calculate the same value
+- **High entropy**: Suitable for seeding random number generators
+
+<Tip>
+Use whitened signatures as a source of randomness that's agreed upon by all nodes, perfect for leader election or random sampling.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Learn about the engine design and FFI layer
+  </Card>
+  <Card title="Events and transactions" icon="arrow-right-arrow-left" href="/concepts/events-and-transactions">
+    Understand how to send and receive data
+  </Card>
+</CardGroup>

@@ -1,0 +1,112 @@
+---
+title: Installation
+description: Install the Tashi Vertex Rust SDK and set up your development environment
+---
+
+# Installation
+
+Get started with the Tashi Vertex Rust SDK by adding it to your project and installing the required build dependencies.
+
+## Add the crate
+
+Add the crate to your Rust project using Cargo:
+
+<CodeGroup>
+```bash cargo add
+cargo add tashi-vertex
+```
+
+```toml Cargo.toml
+[dependencies]
+tashi-vertex = "0.1.0"
+```
+</CodeGroup>
+
+## Build requirements
+
+Before building your project, ensure you have the following dependencies installed:
+
+### CMake
+
+The build process requires **CMake 4.0 or higher**.
+
+<CodeGroup>
+```bash macOS
+brew install cmake
+```
+
+```bash Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install cmake
+```
+
+```bash Fedora/RHEL
+sudo dnf install cmake
+```
+
+```bash Arch Linux
+sudo pacman -S cmake
+```
+</CodeGroup>
+
+Verify your CMake installation:
+
+```bash
+cmake --version
+```
+
+### Tashi Vertex shared library
+
+The **Tashi Vertex shared library** (`libtashi-vertex.so` / `.dylib` / `.dll`) is automatically fetched by the build script when you compile your project. No manual installation is required.
+
+<Note>
+  The Tashi Vertex binary library is proprietary and governed by its own commercial license. See the `NOTICE` file in the source repository for details.
+</Note>
+
+## What gets installed
+
+When you add `tashi-vertex` to your project, you get:
+
+- **Rust bindings** — Safe, ergonomic wrappers around the C library
+- **Type definitions** — All core types like `Engine`, `Context`, `Socket`, `Transaction`, and more
+- **Base58 utilities** — Encode/decode functions for keys and binary data
+- **Async support** — Future-based APIs that work seamlessly with Tokio
+
+## Verify installation
+
+Create a simple program to verify the installation:
+
+```rust main.rs
+use tashi_vertex::KeySecret;
+
+fn main() {
+    let secret = KeySecret::generate();
+    let public = secret.public();
+    
+    println!("Secret: {}", secret);
+    println!("Public: {}", public);
+}
+```
+
+Run it:
+
+```bash
+cargo run
+```
+
+You should see output similar to:
+
+```
+Secret: 2wJLKfvY8xH3z9qP...
+Public: 5aPmN8vR2xK9tL...
+```
+
+<Tip>
+  The secret and public keys are Base58-encoded DER format Ed25519 keys.
+</Tip>
+
+## Next steps
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Build a working consensus network with the quickstart guide
+</Card>

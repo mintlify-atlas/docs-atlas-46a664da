@@ -1,0 +1,364 @@
+---
+title: Architecture
+description: Understanding the design of Tashi Vertex's consensus engine and its Rust bindings
+---
+
+Tashi Vertex provides Rust bindings for an embedded Byzantine fault-tolerant consensus engine. The SDK follows an async-first design with safe FFI wrappers around a high-performance C library.
+
+## System overview
+
+The architecture consists of three main layers:
+
+```
+┌─────────────────────────────────────┐
+│     Your Application (Rust)         │
+│  - Async/await transaction handling │
+│  - Business logic                   │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│   Tashi Vertex Rust Bindings        │
+│  - Safe FFI wrappers                │
+│  - Future-based async operations    │
+│  - Automatic resource cleanup       │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│   Tashi Vertex C Library            │
+│  - Core consensus algorithm         │
+│  - Cryptographic operations         │
+│  - Network protocol                 │
+└─────────────────────────────────────┘
+```
+
+## Core components
+
+### Context
+
+The `Context` is the runtime environment that manages async operations and resources.
+
+```rust
+use tashi_vertex::Context;
+
+let context = Context::new()?;
+// Context must live for the lifetime of all operations
+```
+
+<Note>
+The Context handles internal resource management, threading, and async task coordination. Create one Context per application instance.
+</Note>
+
+#### Implementation details
+
+The Context wraps an opaque pointer (`TVContext`) to the underlying C library's runtime:
+
+```rust src/context.rs
+pub struct Context {
+    pub(crate) handle: Pointer<TVContext>,
+}
+
+impl Context {
+    pub fn new() -> crate::Result<Self> {
+        // Initializes the underlying C runtime
+    }
+}
+```
+
+### Socket
+
+The `Socket` represents a bound network address for peer-to-peer communication. It uses an async binding model:
+
+```rust
+use tashi_vertex::Socket;
+
+let socket = Socket::bind(&context, "127.0.0.1:9000").await?;
+```
+
+<Info>
+Socket binding is fully async and returns a `Future`. The address must be an IPv4 or IPv6 address with port — DNS resolution is not performed.
+</Info>
+
+#### Async implementation
+
+The Socket implements a custom Future that polls the FFI layer:
+
+```rust src/socket.rs
+impl Future for SocketBind<'_> {
+    type Output = crate::Result<Socket>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        // Registers callback with C library
+        // Wakes Rust future when socket is ready
+    }
+}
+```
+
+This pattern enables seamless integration with Tokio and other async runtimes.
+
+### Engine
+
+The `Engine` is the consensus runtime that orchestrates all operations:
+
+```rust
+use tashi_vertex::{Engine, Options, Peers, KeySecret};
+
+let key = KeySecret::generate();
+let mut peers = Peers::new()?;
+// ... configure peers
+
+let engine = Engine::start(
+    &context,
+    socket,
+    Options::default(),
+    &key,
+    peers,
+)?;
+```
+
+#### Engine lifecycle
+
+The Engine:
+1. **Consumes** ownership of Socket, Options, and Peers (they're transferred to the C layer)
+2. **Starts** the consensus algorithm and networking threads
+3. **Provides** methods to send transactions and receive consensus messages
+4. **Manages** peer connections, gossip protocol, and virtual voting
+
+```rust src/engine.rs
+impl Engine {
+    pub fn start(
+        context: &Context,
+        socket: Socket,
+        options: Options,
+        secret: &KeySecret,
+        peers: Peers,
+    ) -> crate::Result<Self> {
+        // Ownership transfer
+        mem::forget(socket);
+        mem::forget(options);
+        mem::forget(peers);
+        
+        // FFI call to start engine
+    }
+}
+```
+
+<Warning>
+Once you call `Engine::start()`, the socket, options, and peers are consumed. You cannot reuse them.
+</Warning>
+
+## FFI layer
+
+The Rust SDK wraps the Tashi Vertex C library using a safe FFI (Foreign Function Interface) design.
+
+### Opaque pointers
+
+All C types are represented as opaque pointers wrapped in Rust's type system:
+
+```rust
+type TVContext = c_void;
+type TVEngine = c_void;
+type TVSocket = c_void;
+type TVOptions = c_void;
+```
+
+The `Pointer<T>` wrapper ensures:
+- **Type safety**: Rust's type system prevents mixing pointer types
+- **Automatic cleanup**: `Drop` implementations free resources
+- **Null safety**: Pointers are verified before use
+
+### Memory safety
+
+The SDK provides several safety guarantees:
+
+<CardGroup cols={2}>
+  <Card title="No unsafe in public API" icon="lock">
+    All `unsafe` code is encapsulated within the library
+  </Card>
+  <Card title="Automatic cleanup" icon="broom">
+    Resources are freed via `Drop` implementations
+  </Card>
+  <Card title="Zero runtime dependencies" icon="feather">
+    Only dynamic linking to the C library
+  </Card>
+  <Card title="Safe concurrency" icon="arrows-split-up-and-left">
+    Thread-safe by design with proper synchronization
+  </Card>
+</CardGroup>
+
+### FFI callback pattern
+
+Async operations use a callback pattern to bridge C and Rust:
+
+```rust
+// Rust side: stores waker for async polling
+struct MessageReceive<'e> {
+    engine: &'e Engine,
+    invoked: bool,
+    waker: Option<task::Waker>,
+    result: Option<crate::Result<Message>>,
+}
+
+// C library calls this when data is ready
+extern "C" fn callback(
+    result: TVResult,
+    data: *const c_void,
+    user_data: *mut c_void,
+) {
+    // Convert to Rust types and wake the Future
+}
+```
+
+This enables zero-copy async I/O while maintaining safety guarantees.
+
+## Peer-to-peer networking
+
+Tashi Vertex uses direct peer-to-peer connections for gossip communication.
+
+### Peer configuration
+
+```rust
+use tashi_vertex::{Peers, KeyPublic};
+
+let mut peers = Peers::new()?;
+
+// Add peers to the network
+peers.insert(
+    "192.168.1.100:9001",
+    &peer1_public_key,
+    Default::default(),
+)?;
+
+peers.insert(
+    "192.168.1.101:9001",
+    &peer2_public_key,
+    Default::default(),
+)?;
+```
+
+Each peer is identified by:
+- **Network address**: IP and port for connection
+- **Public key**: Ed25519 public key for authentication and signature verification
+- **Capabilities**: Optional flags for special node roles
+
+### Connection management
+
+The engine automatically:
+- Establishes connections to configured peers
+- Maintains keep-alive heartbeats
+- Reconnects on network failures
+- Authenticates all messages cryptographically
+
+<Tip>
+Enable hole punching in Options to establish direct connections through NATs:
+```rust
+let mut options = Options::default();
+options.set_enable_hole_punching(true);
+```
+</Tip>
+
+### Gossip protocol
+
+Peers exchange events using an efficient gossip protocol:
+
+1. **Sync initiation**: Node A requests sync with Node B
+2. **DAG comparison**: Nodes identify missing events
+3. **Event exchange**: Missing events are transmitted
+4. **Signature verification**: All events are cryptographically validated
+
+This process runs continuously in the background, ensuring all nodes converge on the same DAG.
+
+## Configuration and tuning
+
+The `Options` type provides 15+ tunable parameters:
+
+```rust
+let mut options = Options::default();
+
+// Timing parameters
+options.set_heartbeat_us(500_000); // 500ms heartbeat
+options.set_target_ack_latency_ms(400);
+options.set_max_ack_latency_ms(600);
+
+// Throughput settings
+options.set_max_unacknowledged_bytes(500 * 1024 * 1024); // 500 MiB
+options.set_transaction_channel_size(32);
+
+// Threading
+options.set_max_blocking_verify_threads(8);
+
+// Advanced features
+options.set_enable_dynamic_epoch_size(true);
+options.set_enable_state_sharing(false);
+```
+
+<Accordion title="Key configuration parameters">
+**Timing controls:**
+- `heartbeat_us`: Empty event interval when idle
+- `target_ack_latency_ms`: Throughput increase threshold
+- `max_ack_latency_ms`: Throughput decrease threshold
+- `throttle_ack_latency_ms`: Emergency throttle threshold
+
+**Throughput controls:**
+- `max_unacknowledged_bytes`: Buffer size before backpressure
+- `transaction_channel_size`: Transaction queue depth
+
+**Resource controls:**
+- `max_blocking_verify_threads`: Signature verification threads
+
+**Advanced features:**
+- `enable_dynamic_epoch_size`: Auto-adjust epoch length (1-3s)
+- `enable_state_sharing`: State sync for fallen-behind nodes
+- `enable_hole_punching`: NAT traversal support
+
+See the [Options API Reference](/api/options) for complete details.
+</Accordion>
+
+## Thread model
+
+Tashi Vertex uses a hybrid threading model:
+
+### Async runtime threads
+
+Managed by your async runtime (e.g., Tokio):
+- Socket binding operations
+- Message receiving
+- Transaction sending
+
+### Background threads
+
+Managed internally by the C library:
+- Gossip protocol execution
+- Consensus algorithm computation
+- Cryptographic signature verification (when events exceed threshold)
+- Network I/O handling
+
+<Note>
+You don't need to manage these threads directly. The engine coordinates everything automatically.
+</Note>
+
+## Error handling
+
+All operations return `Result<T, Error>` with detailed error information:
+
+```rust
+match engine.send_transaction(tx) {
+    Ok(()) => println!("Transaction sent"),
+    Err(e) => eprintln!("Error: {}", e),
+}
+```
+
+The FFI layer translates C error codes into Rust's `Result` type, providing:
+- Type-safe error propagation
+- Composable error handling with `?` operator
+- Integration with Rust's error ecosystem
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Events and transactions" icon="arrow-right-arrow-left" href="/concepts/events-and-transactions">
+    Learn how data flows through the system
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/guides/configuration">
+    Explore all engine configuration options
+  </Card>
+</CardGroup>

@@ -1,0 +1,431 @@
+---
+title: Configuration
+description: Configure engine parameters, performance tuning, and network behavior for Tashi Vertex consensus
+---
+
+This guide covers all configuration options available through the `Options` struct for tuning your Tashi Vertex consensus engine.
+
+## Creating options
+
+Initialize with sensible defaults:
+
+```rust
+use tashi_vertex::Options;
+
+let mut options = Options::default();
+// or
+let mut options = Options::new();
+```
+
+All setter methods are chainable:
+
+```rust
+let mut options = Options::default();
+options.set_heartbeat_us(500_000);
+options.set_report_gossip_events(true);
+options.set_fallen_behind_kick_s(10);
+```
+
+## Event timing
+
+### Base minimum event interval
+
+Controls the minimum time between events in microseconds.
+
+```rust
+// Set to 10 milliseconds
+options.set_base_min_event_interval_us(10_000);
+
+// Get current value
+let interval = options.get_base_min_event_interval_us();
+```
+
+<Accordion title="When to adjust">
+Increase this value to reduce event frequency in high-latency networks. Decrease for faster consensus in low-latency environments.
+</Accordion>
+
+### Heartbeat interval
+
+When there's no data to finalize, empty events are created at this interval to keep the session alive.
+
+**Default:** 500 milliseconds (500,000 microseconds)
+
+```rust
+// Set to 1 second
+options.set_heartbeat_us(1_000_000);
+
+// Get current value
+let heartbeat = options.get_heartbeat_us();
+```
+
+<Note>
+Heartbeats ensure the network stays synchronized even when there are no transactions to process.
+</Note>
+
+## Latency thresholds
+
+These settings control how the engine responds to increasing acknowledgment latency.
+
+### Target acknowledgment latency
+
+When ack latency rises above this threshold, nodes vote that throughput should not increase further.
+
+**Default:** 400 milliseconds
+
+```rust
+options.set_target_ack_latency_ms(400);
+let target = options.get_target_ack_latency_ms();
+```
+
+<Warning>
+If this threshold is lower than your uncongested ping time, the engine will erroneously vote to restrict throughput.
+</Warning>
+
+### Maximum acknowledgment latency
+
+When ack latency rises above this threshold, nodes vote to gradually reduce throughput.
+
+**Default:** 600 milliseconds
+
+```rust
+options.set_max_ack_latency_ms(600);
+let max = options.get_max_ack_latency_ms();
+```
+
+### Throttle acknowledgment latency
+
+When ack latency rises above this threshold, nodes vote to drastically restrict throughput as an emergency measure.
+
+**Default:** 900 milliseconds
+
+```rust
+options.set_throttle_ack_latency_ms(900);
+let throttle = options.get_throttle_ack_latency_ms();
+```
+
+### Reset acknowledgment latency
+
+When ack latency rises above this threshold, nodes vote to reset throughput restriction to its initial value as a last-ditch recovery effort.
+
+**Default:** 2000 milliseconds
+
+```rust
+options.set_reset_ack_latency_ms(2000);
+let reset = options.get_reset_ack_latency_ms();
+```
+
+### Latency threshold hierarchy
+
+<Steps>
+  <Step title="Target (400ms)">
+    Vote to prevent throughput increase
+  </Step>
+  <Step title="Max (600ms)">
+    Vote to gradually reduce throughput
+  </Step>
+  <Step title="Throttle (900ms)">
+    Vote to drastically restrict throughput
+  </Step>
+  <Step title="Reset (2000ms)">
+    Vote to reset throughput restrictions
+  </Step>
+</Steps>
+
+## Epoch configuration
+
+### Dynamic epoch sizing
+
+When enabled, nodes vote to resize epochs based on network conditions to keep epoch lengths between 1-3 seconds.
+
+**Default:** `true`
+
+```rust
+options.set_enable_dynamic_epoch_size(true);
+let enabled = options.get_enable_dynamic_epoch_size();
+```
+
+<Accordion title="Why dynamic epochs matter">
+- Rounds may pass at varying speeds depending on network conditions
+- Joining/leaving creators must wait out the epoch before address book changes take effect
+- Leaving creators don't want to wait too long
+- Joining creators need sufficient time to join successfully
+- Dynamic sizing balances these competing needs automatically
+</Accordion>
+
+## Peer management
+
+### Fallen behind kick threshold
+
+Number of seconds a creator can fall behind before the node votes to kick them. Set to a negative value to never vote to kick.
+
+**Default:** Not explicitly set (implementation-dependent)
+
+```rust
+// Kick after 10 seconds
+options.set_fallen_behind_kick_s(10);
+
+// Never vote to kick
+options.set_fallen_behind_kick_s(-1);
+
+// Get current value
+let kick_threshold = options.get_fallen_behind_kick_s();
+```
+
+<Note>
+This prevents the network from being slowed down by persistently lagging nodes.
+</Note>
+
+## Transaction handling
+
+### Transaction channel size
+
+Maximum number of transactions to buffer before applying backpressure.
+
+**Default:** 32
+
+```rust
+options.set_transaction_channel_size(64);
+let size = options.get_transaction_channel_size();
+```
+
+### Maximum unacknowledged bytes
+
+Maximum bytes worth of transactions that haven't yet been seen by the network to pull from the transaction buffer.
+
+**Default:** 500 MiB (524,288,000 bytes)
+
+```rust
+// Set to 1 GiB
+options.set_max_unacknowledged_bytes(1_073_741_824);
+let max_bytes = options.get_max_unacknowledged_bytes();
+```
+
+<Warning>
+Increasing this value consumes more memory but allows more transactions to be buffered during high throughput.
+</Warning>
+
+## Threading and performance
+
+### Maximum blocking verify threads
+
+Maximum number of threads to spawn for blocking signature verifications. Above a constant threshold, verifications are offloaded to this thread pool instead of using Tokio's core threads.
+
+**Default:** Number of CPU cores available
+
+```rust
+// Set to 8 threads
+options.set_max_blocking_verify_threads(8);
+let threads = options.get_max_blocking_verify_threads();
+```
+
+<Accordion title="Thread pool behavior">
+- Below threshold: verifications use spare compute time in Tokio's core thread pool
+- Above threshold: verifications are sent to this dedicated blocking thread pool
+- Cannot be zero or events larger than threshold cannot be verified
+</Accordion>
+
+## State sharing
+
+### Enable state sharing
+
+Enables sharing of epoch states with fallen behind creators.
+
+**Default:** `false`
+
+```rust
+options.set_enable_state_sharing(true);
+let enabled = options.get_enable_state_sharing();
+```
+
+### Epoch states to cache
+
+Number of epoch states to cache when state sharing is enabled.
+
+**Default:** 3
+
+```rust
+options.set_epoch_states_to_cache(5);
+let cache_size = options.get_epoch_states_to_cache();
+```
+
+<Note>
+If a fallen behind creator fails to download an epoch's state before it expires from the cache, they'll have to restart the download.
+</Note>
+
+## Network features
+
+### Hole punching
+
+Attempt to use UDP hole punching to establish direct connections between creators behind NATs.
+
+**Default:** `true`
+
+```rust
+options.set_enable_hole_punching(true);
+let enabled = options.get_enable_hole_punching();
+```
+
+<Accordion title="How hole punching works">
+When enabled, nodes behind NATs can establish direct peer-to-peer connections by coordinating through public nodes. This improves latency and reduces load on relay nodes.
+</Accordion>
+
+### Report gossip events
+
+Enables reporting of gossip events through the message channel.
+
+**Default:** `false`
+
+```rust
+options.set_report_gossip_events(true);
+let enabled = options.get_report_gossip_events();
+```
+
+<Note>
+Enable this if you need visibility into gossip-level events for monitoring or debugging.
+</Note>
+
+## Configuration examples
+
+### High-performance local network
+
+```rust
+let mut options = Options::default();
+
+// Faster heartbeats for low latency
+options.set_heartbeat_us(100_000); // 100ms
+
+// Aggressive latency thresholds
+options.set_target_ack_latency_ms(50);
+options.set_max_ack_latency_ms(100);
+options.set_throttle_ack_latency_ms(200);
+
+// Larger transaction buffer
+options.set_transaction_channel_size(128);
+options.set_max_unacknowledged_bytes(1_073_741_824); // 1 GiB
+
+// More verify threads
+options.set_max_blocking_verify_threads(16);
+```
+
+### High-latency WAN network
+
+```rust
+let mut options = Options::default();
+
+// Slower heartbeats
+options.set_heartbeat_us(2_000_000); // 2 seconds
+
+// Relaxed latency thresholds
+options.set_target_ack_latency_ms(800);
+options.set_max_ack_latency_ms(1200);
+options.set_throttle_ack_latency_ms(2000);
+options.set_reset_ack_latency_ms(5000);
+
+// Enable state sharing for recovery
+options.set_enable_state_sharing(true);
+options.set_epoch_states_to_cache(5);
+
+// Be patient with lagging nodes
+options.set_fallen_behind_kick_s(30);
+```
+
+### Resource-constrained environment
+
+```rust
+let mut options = Options::default();
+
+// Smaller buffers
+options.set_transaction_channel_size(16);
+options.set_max_unacknowledged_bytes(104_857_600); // 100 MiB
+
+// Fewer threads
+options.set_max_blocking_verify_threads(2);
+
+// Disable state sharing to save memory
+options.set_enable_state_sharing(false);
+
+// Smaller epoch cache
+options.set_epoch_states_to_cache(1);
+```
+
+### Development and debugging
+
+```rust
+let mut options = Options::default();
+
+// Enable all events for visibility
+options.set_report_gossip_events(true);
+
+// Aggressive kicking for fast iteration
+options.set_fallen_behind_kick_s(5);
+
+// Fast heartbeats
+options.set_heartbeat_us(250_000); // 250ms
+
+// Enable state sharing for testing recovery
+options.set_enable_state_sharing(true);
+```
+
+## Getter methods reference
+
+Every setter has a corresponding getter:
+
+<CodeGroup>
+```rust Timing
+let interval = options.get_base_min_event_interval_us();
+let heartbeat = options.get_heartbeat_us();
+```
+
+```rust Latency thresholds
+let target = options.get_target_ack_latency_ms();
+let max = options.get_max_ack_latency_ms();
+let throttle = options.get_throttle_ack_latency_ms();
+let reset = options.get_reset_ack_latency_ms();
+```
+
+```rust Features
+let gossip = options.get_report_gossip_events();
+let dynamic_epoch = options.get_enable_dynamic_epoch_size();
+let state_sharing = options.get_enable_state_sharing();
+let hole_punch = options.get_enable_hole_punching();
+```
+
+```rust Capacity
+let tx_channel = options.get_transaction_channel_size();
+let max_unacked = options.get_max_unacknowledged_bytes();
+let verify_threads = options.get_max_blocking_verify_threads();
+let epoch_cache = options.get_epoch_states_to_cache();
+```
+
+```rust Peer management
+let kick_threshold = options.get_fallen_behind_kick_s();
+```
+</CodeGroup>
+
+## Best practices
+
+<Steps>
+  <Step title="Start with defaults">
+    The default values work well for most networks. Only adjust after measuring performance.
+  </Step>
+  
+  <Step title="Match latency to network">
+    Set latency thresholds based on your actual network ping times. Use values higher than uncongested latency.
+  </Step>
+  
+  <Step title="Monitor resource usage">
+    Watch memory and CPU usage when adjusting buffer sizes and thread counts.
+  </Step>
+  
+  <Step title="Test configuration changes">
+    Use a development environment to test configuration changes before deploying to production.
+  </Step>
+  
+  <Step title="Document your settings">
+    Keep notes on why you chose specific values for easier troubleshooting.
+  </Step>
+</Steps>
+
+## Next steps
+
+Learn how to integrate these options when starting your engine in [Running a node](/guides/running-a-node).

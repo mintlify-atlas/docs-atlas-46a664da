@@ -1,0 +1,401 @@
+---
+title: Transaction handling
+description: Learn how to create, send, and process transactions in Tashi Vertex
+---
+
+This guide covers the complete lifecycle of transactions in Tashi Vertex, from allocation to processing received events.
+
+## Overview
+
+Transactions are the fundamental unit of data in Tashi Vertex. They:
+- Carry arbitrary binary data (typically application payloads)
+- Are gossiped across the network
+- Reach consensus through the hashgraph algorithm
+- Are delivered to all nodes in the same consensus order
+
+## Transaction lifecycle
+
+<Steps>
+  <Step title="Allocate">
+    Reserve memory for your transaction data using `Transaction::allocate()`.
+  </Step>
+
+  <Step title="Populate">
+    Write your payload into the transaction buffer.
+  </Step>
+
+  <Step title="Send">
+    Submit the transaction to the engine for network gossip.
+  </Step>
+
+  <Step title="Consensus">
+    The network reaches agreement on transaction order.
+  </Step>
+
+  <Step title="Receive">
+    Process transactions from events delivered by the engine.
+  </Step>
+</Steps>
+
+## Allocating transactions
+
+Transactions must be allocated before use. The `Transaction` type manages a buffer of the specified size:
+
+```rust
+use tashi_vertex::Transaction;
+
+// Allocate a 1024-byte transaction buffer
+let mut transaction = Transaction::allocate(1024);
+```
+
+<Note>
+  `Transaction` implements `Deref` and `DerefMut` to `[u8]`, so you can work with it like a byte slice.
+</Note>
+
+## Populating transactions
+
+Once allocated, write your data into the transaction buffer:
+
+<Tabs>
+  <Tab title="String data">
+    ```rust
+    let message = "Hello, Tashi Vertex!";
+    let mut transaction = Transaction::allocate(message.len());
+
+    transaction.copy_from_slice(message.as_bytes());
+    ```
+  </Tab>
+
+  <Tab title="Null-terminated string">
+    ```rust
+    let message = "PING";
+    let mut transaction = Transaction::allocate(message.len() + 1);
+
+    transaction[..message.len()].copy_from_slice(message.as_bytes());
+    transaction[message.len()] = 0; // null-terminate
+    ```
+  </Tab>
+
+  <Tab title="Binary data">
+    ```rust
+    let data: Vec<u8> = vec![0x01, 0x02, 0x03, 0x04];
+    let mut transaction = Transaction::allocate(data.len());
+
+    transaction.copy_from_slice(&data);
+    ```
+  </Tab>
+
+  <Tab title="Serialized struct">
+    ```rust
+    use serde::{Serialize, Deserialize};
+
+    #[derive(Serialize, Deserialize)]
+    struct Message {
+        id: u64,
+        content: String,
+    }
+
+    let msg = Message {
+        id: 42,
+        content: "Hello".to_string(),
+    };
+
+    let bytes = bincode::serialize(&msg)?;
+    let mut transaction = Transaction::allocate(bytes.len());
+    transaction.copy_from_slice(&bytes);
+    ```
+  </Tab>
+</Tabs>
+
+## Sending transactions
+
+Submit transactions to the network using `engine.send_transaction()`:
+
+```rust
+use tashi_vertex::{Engine, Transaction};
+
+fn send_message(engine: &Engine, message: &str) -> tashi_vertex::Result<()> {
+    let mut transaction = Transaction::allocate(message.len());
+    transaction.copy_from_slice(message.as_bytes());
+    engine.send_transaction(transaction)
+}
+```
+
+<Info>
+  Once sent, the transaction is consumed. The engine takes ownership and manages the memory automatically.
+</Info>
+
+### Helper function for strings
+
+For convenience, you can create a helper to send null-terminated strings:
+
+```rust
+pub fn send_transaction_cstr(engine: &Engine, s: &str) -> tashi_vertex::Result<()> {
+    let mut transaction = Transaction::allocate(s.len() + 1);
+
+    transaction[..s.len()].copy_from_slice(s.as_bytes());
+    transaction[s.len()] = 0; // null-terminate
+
+    engine.send_transaction(transaction)
+}
+
+// Usage
+send_transaction_cstr(&engine, "PING")?;
+send_transaction_cstr(&engine, "Hello, network!")?;
+```
+
+## Receiving transactions
+
+Transactions are received as part of `Event` messages. Use `engine.recv_message()` to process incoming messages:
+
+```rust
+use tashi_vertex::Message;
+use std::str::from_utf8;
+
+while let Some(message) = engine.recv_message().await? {
+    match message {
+        Message::Event(event) => {
+            // Check if event contains transactions
+            if event.transaction_count() > 0 {
+                println!("Received {} transactions", event.transaction_count());
+
+                // Process each transaction
+                for tx in event.transactions() {
+                    // tx is a &[u8] slice
+                    process_transaction(tx)?;
+                }
+            }
+        }
+
+        Message::SyncPoint(_) => {
+            // Handle synchronization point
+            println!("Sync point reached");
+        }
+    }
+}
+```
+
+## Processing transaction data
+
+Transactions are delivered as byte slices (`&[u8]`). Parse them based on your application protocol:
+
+<Tabs>
+  <Tab title="String data">
+    ```rust
+    use std::str::from_utf8;
+
+    fn process_transaction(tx: &[u8]) -> anyhow::Result<()> {
+        let message = from_utf8(tx)?;
+        println!("Received: {}", message);
+        Ok(())
+    }
+    ```
+  </Tab>
+
+  <Tab title="Null-terminated string">
+    ```rust
+    use std::ffi::CStr;
+
+    fn process_transaction(tx: &[u8]) -> anyhow::Result<()> {
+        // Remove null terminator if present
+        let message = if tx.last() == Some(&0) {
+            std::str::from_utf8(&tx[..tx.len() - 1])?
+        } else {
+            std::str::from_utf8(tx)?
+        };
+
+        println!("Received: {}", message);
+        Ok(())
+    }
+    ```
+  </Tab>
+
+  <Tab title="Binary data">
+    ```rust
+    fn process_transaction(tx: &[u8]) -> anyhow::Result<()> {
+        // Process raw bytes
+        println!("Received {} bytes", tx.len());
+
+        for (i, byte) in tx.iter().enumerate() {
+            println!("  [{}] = 0x{:02x}", i, byte);
+        }
+
+        Ok(())
+    }
+    ```
+  </Tab>
+
+  <Tab title="Serialized struct">
+    ```rust
+    use serde::{Serialize, Deserialize};
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct Message {
+        id: u64,
+        content: String,
+    }
+
+    fn process_transaction(tx: &[u8]) -> anyhow::Result<()> {
+        let msg: Message = bincode::deserialize(tx)?;
+        println!("Received message: {:?}", msg);
+        Ok(())
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Event metadata
+
+Each event provides metadata about the transactions it contains:
+
+```rust
+Message::Event(event) => {
+    // Event creator (node that created the event)
+    println!("Creator: {}", event.creator());
+
+    // When the event was created (timestamp)
+    println!("Created at: {}", event.created_at());
+
+    // When consensus was reached (timestamp)
+    println!("Consensus at: {}", event.consensus_at());
+
+    // Number of transactions in this event
+    println!("Transaction count: {}", event.transaction_count());
+
+    // Consensus order guarantees
+    println!("All nodes see this event at the same position");
+}
+```
+
+<Info>
+  The consensus timestamp (`consensus_at()`) is guaranteed to be the same across all nodes for a given event, ensuring deterministic ordering.
+</Info>
+
+## Complete example
+
+Here's a complete example that sends and receives transactions:
+
+```rust
+use std::str::from_utf8;
+use tashi_vertex::{
+    Context, Engine, KeySecret, Message, Options, Peers, Socket, Transaction,
+};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Setup (abbreviated - see pingback example for full details)
+    let context = Context::new()?;
+    let socket = Socket::bind(&context, "127.0.0.1:8001").await?;
+    let key = KeySecret::generate();
+    let peers = Peers::with_capacity(1)?;
+    let options = Options::default();
+
+    let engine = Engine::start(&context, socket, options, &key, peers)?;
+
+    // Send transactions
+    send_message(&engine, "Hello")?;
+    send_message(&engine, "World")?;
+
+    // Receive and process transactions
+    while let Some(message) = engine.recv_message().await? {
+        if let Message::Event(event) = message {
+            for tx in event.transactions() {
+                let text = from_utf8(tx)?;
+                println!("Received: {}", text);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn send_message(engine: &Engine, message: &str) -> tashi_vertex::Result<()> {
+    let mut transaction = Transaction::allocate(message.len());
+    transaction.copy_from_slice(message.as_bytes());
+    engine.send_transaction(transaction)
+}
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Size your transactions appropriately">
+    Allocate only the memory you need. Oversized transactions waste network bandwidth and memory.
+
+    ```rust
+    // Good: exact size
+    let mut tx = Transaction::allocate(data.len());
+
+    // Bad: oversized
+    let mut tx = Transaction::allocate(1024 * 1024); // 1MB for 10 bytes of data
+    ```
+  </Accordion>
+
+  <Accordion title="Use consistent encoding">
+    Choose a serialization format and stick with it across your application:
+    - Simple strings for text protocols
+    - JSON for human-readable data
+    - Bincode, MessagePack, or Protobuf for binary efficiency
+
+    ```rust
+    // Define your protocol
+    enum TxType {
+        Text(String),
+        Binary(Vec<u8>),
+    }
+
+    // Serialize consistently
+    let bytes = bincode::serialize(&tx_type)?;
+    ```
+  </Accordion>
+
+  <Accordion title="Handle errors gracefully">
+    Transaction parsing can fail. Always handle errors to prevent crashes:
+
+    ```rust
+    for tx in event.transactions() {
+        match process_transaction(tx) {
+            Ok(_) => {},
+            Err(e) => eprintln!("Failed to process transaction: {}", e),
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Track transaction ordering">
+    Use event metadata to maintain ordering guarantees:
+
+    ```rust
+    let mut last_consensus_time = 0;
+
+    for event in events {
+        assert!(event.consensus_at() >= last_consensus_time);
+        last_consensus_time = event.consensus_at();
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Transaction guarantees
+
+Tashi Vertex provides the following guarantees:
+
+1. **Consensus order**: All nodes receive transactions in the same order
+2. **Delivery**: Once consensus is reached, all nodes receive the transaction
+3. **Deterministic timestamps**: Consensus timestamps are identical across nodes
+4. **Byzantine fault tolerance**: The network tolerates up to ⌊(n-1)/3⌋ faulty nodes
+
+<Note>
+  Transactions are not persisted by default. If you need durability, implement your own storage layer that processes transactions from events.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Pingback network" href="/examples/pingback-network">
+    See transactions in action with a complete network example
+  </Card>
+  <Card title="Key generation" href="/examples/key-generation">
+    Learn about cryptographic key management
+  </Card>
+</CardGroup>

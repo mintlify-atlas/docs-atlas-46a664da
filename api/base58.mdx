@@ -1,0 +1,226 @@
+---
+title: base58
+description: Base58 encoding and decoding utilities for keys and binary data
+---
+
+The `base58` module provides utilities for encoding and decoding binary data using Base58 encoding. Base58 is commonly used in cryptocurrencies and blockchain systems because it avoids visually similar characters (0, O, I, l) and is URL-safe.
+
+<Info>
+Tashi Vertex uses Base58 encoding for human-readable key representation. All keys (`KeySecret` and `KeyPublic`) are displayed and parsed using Base58-encoded DER format.
+</Info>
+
+## Encoding
+
+### encode
+
+```rust
+pub fn encode(input: &[u8], output: &mut [u8]) -> crate::Result<usize>
+```
+
+Encodes a byte array into Base58, writing to the provided output buffer.
+
+<ParamField path="input" type="&[u8]">
+  Binary data to encode
+</ParamField>
+
+<ParamField path="output" type="&mut [u8]">
+  Output buffer for Base58-encoded ASCII bytes (must be large enough)
+</ParamField>
+
+**Returns**
+
+- `Ok(usize)` - The number of bytes written to the output buffer
+- `Err(Error)` - If the output buffer is too small
+
+**Example**
+
+```rust
+use tashi_vertex::base58;
+
+let data = b"hello world";
+let mut output = vec![0u8; base58::encode_length(data.len())];
+let len = base58::encode(data, &mut output)?;
+let encoded = &output[..len];
+```
+
+### encode_to_string
+
+```rust
+pub fn encode_to_string(input: &[u8]) -> crate::Result<String>
+```
+
+Encodes a byte array into a Base58 string.
+
+<ParamField path="input" type="&[u8]">
+  Binary data to encode
+</ParamField>
+
+**Returns**
+
+- `Ok(String)` - Base58-encoded string
+- `Err(Error)` - If encoding fails
+
+**Example**
+
+```rust
+use tashi_vertex::base58;
+
+let data = b"hello world";
+let encoded = base58::encode_to_string(data)?;
+println!("Base58: {}", encoded);
+```
+
+### encode_length
+
+```rust
+pub const fn encode_length(input_len: usize) -> usize
+```
+
+Calculates the maximum length of a Base58-encoded string given the input length.
+
+<ParamField path="input_len" type="usize">
+  Length of the input byte array
+</ParamField>
+
+**Returns**
+
+The maximum number of bytes needed for the Base58-encoded output.
+
+<Note>
+This function calculates the maximum possible length. The actual encoded length may be shorter depending on the input data.
+</Note>
+
+**Example**
+
+```rust
+use tashi_vertex::base58;
+
+let data = b"hello world";
+let max_len = base58::encode_length(data.len());
+let mut output = vec![0u8; max_len];
+```
+
+## Decoding
+
+### decode
+
+```rust
+pub fn decode(input: &[u8], output: &mut [u8]) -> crate::Result<usize>
+```
+
+Decodes a Base58 string into binary data.
+
+<ParamField path="input" type="&[u8]">
+  Base58-encoded ASCII bytes to decode
+</ParamField>
+
+<ParamField path="output" type="&mut [u8]">
+  Output buffer for decoded binary data (must be large enough)
+</ParamField>
+
+**Returns**
+
+- `Ok(usize)` - The number of bytes written to the output buffer
+- `Err(Error)` - If the input is invalid Base58 or the output buffer is too small
+
+**Example**
+
+```rust
+use tashi_vertex::base58;
+
+let encoded = b"StV1DL6CwTryKyV";
+let mut output = vec![0u8; base58::decode_length(encoded.len())];
+let len = base58::decode(encoded, &mut output)?;
+let decoded = &output[..len];
+```
+
+### decode_to_vec
+
+```rust
+pub fn decode_to_vec(input: &[u8]) -> crate::Result<Vec<u8>>
+```
+
+Decodes a Base58 string into a byte vector.
+
+<ParamField path="input" type="&[u8]">
+  Base58-encoded ASCII bytes to decode
+</ParamField>
+
+**Returns**
+
+- `Ok(Vec<u8>)` - Decoded binary data
+- `Err(Error)` - If the input is invalid Base58
+
+**Example**
+
+```rust
+use tashi_vertex::base58;
+
+let encoded = b"StV1DL6CwTryKyV";
+let decoded = base58::decode_to_vec(encoded)?;
+assert_eq!(decoded, b"hello world");
+```
+
+### decode_length
+
+```rust
+pub const fn decode_length(input_len: usize) -> usize
+```
+
+Calculates the maximum length of a decoded byte array given the Base58 string length.
+
+<ParamField path="input_len" type="usize">
+  Length of the Base58-encoded string
+</ParamField>
+
+**Returns**
+
+The maximum number of bytes needed for the decoded output.
+
+<Note>
+This function calculates the maximum possible length. The actual decoded length may be shorter depending on the input data.
+</Note>
+
+**Example**
+
+```rust
+use tashi_vertex::base58;
+
+let encoded = b"StV1DL6CwTryKyV";
+let max_len = base58::decode_length(encoded.len());
+let mut output = vec![0u8; max_len];
+```
+
+## Usage with keys
+
+The `base58` module is used internally by `KeySecret` and `KeyPublic` for string serialization:
+
+```rust
+use tashi_vertex::KeySecret;
+
+// Generate a key
+let secret = KeySecret::generate();
+
+// Display uses Base58 encoding internally
+println!("Secret: {}", secret); // Base58-encoded DER
+
+// Parse uses Base58 decoding internally
+let parsed: KeySecret = "aSq9DsNNvGhY...".parse()?;
+```
+
+## Base58 alphabet
+
+Base58 uses the following 58 characters, excluding similar-looking characters:
+
+```
+123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
+```
+
+<Warning>
+Base58 strings are case-sensitive. The characters `0` (zero), `O` (capital O), `I` (capital i), and `l` (lowercase L) are not part of the Base58 alphabet.
+</Warning>
+
+## See also
+
+- [KeySecret](/api/key-secret) - Uses Base58 for key serialization
+- [KeyPublic](/api/key-public) - Uses Base58 for key serialization

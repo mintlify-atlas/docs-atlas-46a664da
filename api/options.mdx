@@ -1,0 +1,428 @@
+---
+title: Options
+description: Configuration options for the Tashi Vertex consensus engine
+---
+
+The `Options` type provides configuration parameters for fine-tuning the behavior of the Tashi Vertex consensus engine. It includes settings for timing, throughput, latency management, and network behavior.
+
+## Constructor
+
+### new
+
+Initializes a default set of options.
+
+```rust
+pub fn new() -> Self
+```
+
+#### Returns
+
+<ParamField body="return" type="Options">
+  A new `Options` instance with default values.
+</ParamField>
+
+#### Example
+
+```rust
+use tashi_vertex::Options;
+
+let mut options = Options::new();
+```
+
+<Note>
+  `Options` implements the `Default` trait, so you can also use `Options::default()`.
+</Note>
+
+## Configuration methods
+
+### Timing and intervals
+
+#### set_base_min_event_interval_us
+
+Sets the base minimum event interval (in microseconds).
+
+```rust
+pub fn set_base_min_event_interval_us(&mut self, interval: u64)
+```
+
+<ParamField body="interval" type="u64" required>
+  The minimum interval between events in microseconds
+</ParamField>
+
+#### set_heartbeat_us
+
+Sets the heartbeat interval (in microseconds).
+
+```rust
+pub fn set_heartbeat_us(&mut self, heartbeat: u64)
+```
+
+<ParamField body="heartbeat" type="u64" required>
+  The heartbeat interval in microseconds. Default: 500,000 (500 milliseconds).
+</ParamField>
+
+When there is no data to finalize, empty events are created at this interval to keep the session alive.
+
+#### get_base_min_event_interval_us
+
+Gets the base minimum event interval (in microseconds).
+
+```rust
+pub fn get_base_min_event_interval_us(&self) -> u64
+```
+
+#### get_heartbeat_us
+
+Gets the heartbeat interval (in microseconds).
+
+```rust
+pub fn get_heartbeat_us(&self) -> u64
+```
+
+### Latency management
+
+#### set_target_ack_latency_ms
+
+Sets the target acknowledgment latency (in milliseconds).
+
+```rust
+pub fn set_target_ack_latency_ms(&mut self, latency: u32)
+```
+
+<ParamField body="latency" type="u32" required>
+  The target acknowledgment latency in milliseconds. Default: 400 milliseconds.
+</ParamField>
+
+As throughput across the session increases, the ack latency increases. When the ack latency rises above this threshold, the node votes that throughput should not increase further.
+
+<Warning>
+  If this threshold is lower than your uncongested ping, the node will erroneously always vote to restrict throughput.
+</Warning>
+
+#### set_max_ack_latency_ms
+
+Sets the maximum acknowledgment latency (in milliseconds).
+
+```rust
+pub fn set_max_ack_latency_ms(&mut self, latency: u32)
+```
+
+<ParamField body="latency" type="u32" required>
+  The maximum acknowledgment latency in milliseconds. Default: 600 milliseconds.
+</ParamField>
+
+If ack latency rises above this threshold, the node votes to gradually reduce throughput across the session to bring it down.
+
+#### set_throttle_ack_latency_ms
+
+Sets the throttle acknowledgment latency (in milliseconds).
+
+```rust
+pub fn set_throttle_ack_latency_ms(&mut self, latency: u32)
+```
+
+<ParamField body="latency" type="u32" required>
+  The throttle acknowledgment latency in milliseconds. Default: 900 milliseconds.
+</ParamField>
+
+If ack latency rises above this threshold, the node votes to drastically restrict throughput across the session as an emergency measure.
+
+#### set_reset_ack_latency_ms
+
+Sets the reset acknowledgment latency (in milliseconds).
+
+```rust
+pub fn set_reset_ack_latency_ms(&mut self, latency: u32)
+```
+
+<ParamField body="latency" type="u32" required>
+  The reset acknowledgment latency in milliseconds. Default: 2000 milliseconds.
+</ParamField>
+
+If ack latency rises above this threshold, the node votes to reset throughput restriction to its initial value. This is a last-ditch effort to recover from rising ack latency.
+
+#### get_target_ack_latency_ms
+
+Gets the target acknowledgment latency (in milliseconds).
+
+```rust
+pub fn get_target_ack_latency_ms(&self) -> u32
+```
+
+#### get_max_ack_latency_ms
+
+Gets the maximum acknowledgment latency (in milliseconds).
+
+```rust
+pub fn get_max_ack_latency_ms(&self) -> u32
+```
+
+#### get_throttle_ack_latency_ms
+
+Gets the throttle acknowledgment latency (in milliseconds).
+
+```rust
+pub fn get_throttle_ack_latency_ms(&self) -> u32
+```
+
+#### get_reset_ack_latency_ms
+
+Gets the reset acknowledgment latency (in milliseconds).
+
+```rust
+pub fn get_reset_ack_latency_ms(&self) -> u32
+```
+
+### Peer management
+
+#### set_fallen_behind_kick_s
+
+Sets the number of seconds a creator can fall behind before being kicked.
+
+```rust
+pub fn set_fallen_behind_kick_s(&mut self, kick: i64)
+```
+
+<ParamField body="kick" type="i64" required>
+  The number of seconds. If negative, the node will never vote to kick.
+</ParamField>
+
+If a creator falls behind for this many seconds or more, the node will vote to kick them.
+
+#### get_fallen_behind_kick_s
+
+Gets the number of seconds a creator can fall behind before being kicked.
+
+```rust
+pub fn get_fallen_behind_kick_s(&self) -> i64
+```
+
+### Event reporting
+
+#### set_report_gossip_events
+
+Enables or disables reporting of gossip events.
+
+```rust
+pub fn set_report_gossip_events(&mut self, enabled: bool)
+```
+
+<ParamField body="enabled" type="bool" required>
+  Whether to report gossip events
+</ParamField>
+
+#### get_report_gossip_events
+
+Gets whether reporting of gossip events is enabled.
+
+```rust
+pub fn get_report_gossip_events(&self) -> bool
+```
+
+### Dynamic epoch sizing
+
+#### set_enable_dynamic_epoch_size
+
+Enables or disables dynamic epoch sizing.
+
+```rust
+pub fn set_enable_dynamic_epoch_size(&mut self, enabled: bool)
+```
+
+<ParamField body="enabled" type="bool" required>
+  Whether to enable dynamic epoch sizing. Default: `true`.
+</ParamField>
+
+If `true`, the node will vote to resize the epoch depending on network conditions. Depending on network conditions, rounds may pass more quickly or more slowly.
+
+Whenever a creator joins or leaves, they'll have to wait out the epoch before the address book change takes effect. A leaving creator doesn't want to wait too long, and a joining creator needs a sufficiently long window in which to join.
+
+Creators who don't disable this config option will automatically vote to keep epoch lengths in the range of 1 to 3 seconds.
+
+#### get_enable_dynamic_epoch_size
+
+Gets whether dynamic epoch sizing is enabled.
+
+```rust
+pub fn get_enable_dynamic_epoch_size(&self) -> bool
+```
+
+### Transaction management
+
+#### set_transaction_channel_size
+
+Sets the transaction channel size.
+
+```rust
+pub fn set_transaction_channel_size(&mut self, size: usize)
+```
+
+<ParamField body="size" type="usize" required>
+  The maximum number of transactions to buffer. Default: 32.
+</ParamField>
+
+The maximum number of transactions to buffer before applying backpressure.
+
+#### set_max_unacknowledged_bytes
+
+Sets the maximum number of unacknowledged bytes.
+
+```rust
+pub fn set_max_unacknowledged_bytes(&mut self, bytes: usize)
+```
+
+<ParamField body="bytes" type="usize" required>
+  The maximum number of unacknowledged bytes. Default: 524,288,000 (500 MiB).
+</ParamField>
+
+How many bytes worth of transactions that haven't yet been seen by the network to pull from the transaction buffer.
+
+#### get_transaction_channel_size
+
+Gets the transaction channel size.
+
+```rust
+pub fn get_transaction_channel_size(&self) -> usize
+```
+
+#### get_max_unacknowledged_bytes
+
+Gets the maximum number of unacknowledged bytes.
+
+```rust
+pub fn get_max_unacknowledged_bytes(&self) -> usize
+```
+
+### Thread pool configuration
+
+#### set_max_blocking_verify_threads
+
+Sets the maximum number of blocking verify threads.
+
+```rust
+pub fn set_max_blocking_verify_threads(&mut self, threads: usize)
+```
+
+<ParamField body="threads" type="usize" required>
+  The maximum number of threads. Default: number of CPU cores available.
+</ParamField>
+
+Above a constant threshold, signature verifications are sent to a blocking thread pool instead of using spare compute time in Tokio's core thread pool. This sets the maximum number of threads to spawn for blocking verifications.
+
+<Warning>
+  This value cannot be zero or else events that grow larger than the threshold cannot be verified.
+</Warning>
+
+#### get_max_blocking_verify_threads
+
+Gets the maximum number of blocking verify threads.
+
+```rust
+pub fn get_max_blocking_verify_threads(&self) -> usize
+```
+
+### State sharing
+
+#### set_enable_state_sharing
+
+Enables or disables state sharing.
+
+```rust
+pub fn set_enable_state_sharing(&mut self, enabled: bool)
+```
+
+<ParamField body="enabled" type="bool" required>
+  Whether to enable state sharing. Default: `false`.
+</ParamField>
+
+#### set_epoch_states_to_cache
+
+Sets the number of epoch states to cache.
+
+```rust
+pub fn set_epoch_states_to_cache(&mut self, epochs: u16)
+```
+
+<ParamField body="epochs" type="u16" required>
+  The number of epoch states to cache. Default: 3.
+</ParamField>
+
+When state sharing is enabled, this is the number of epoch states to cache. If a fallen behind creator fails to download an epoch's state in time, they will have to restart the download.
+
+#### get_enable_state_sharing
+
+Gets whether state sharing is enabled.
+
+```rust
+pub fn get_enable_state_sharing(&self) -> bool
+```
+
+#### get_epoch_states_to_cache
+
+Gets the number of epoch states to cache.
+
+```rust
+pub fn get_epoch_states_to_cache(&self) -> u16
+```
+
+### Network features
+
+#### set_enable_hole_punching
+
+Enables or disables hole punching.
+
+```rust
+pub fn set_enable_hole_punching(&mut self, enabled: bool)
+```
+
+<ParamField body="enabled" type="bool" required>
+  Whether to enable hole punching. Default: `true`.
+</ParamField>
+
+If `true`, the node will attempt to use UDP hole punching to establish direct connections between creators behind NATs.
+
+#### get_enable_hole_punching
+
+Gets whether hole punching is enabled.
+
+```rust
+pub fn get_enable_hole_punching(&self) -> bool
+```
+
+## Usage example
+
+```rust
+use tashi_vertex::Options;
+
+let mut options = Options::new();
+
+// Configure timing
+options.set_heartbeat_us(500_000); // 500ms
+
+// Configure latency thresholds
+options.set_target_ack_latency_ms(400);
+options.set_max_ack_latency_ms(600);
+options.set_throttle_ack_latency_ms(900);
+
+// Configure transaction handling
+options.set_transaction_channel_size(64);
+options.set_max_unacknowledged_bytes(1_000_000_000); // 1 GB
+
+// Enable features
+options.set_enable_dynamic_epoch_size(true);
+options.set_enable_hole_punching(true);
+options.set_enable_state_sharing(true);
+options.set_epoch_states_to_cache(5);
+
+// Query current values
+let heartbeat = options.get_heartbeat_us();
+let max_latency = options.get_max_ack_latency_ms();
+```
+
+<Note>
+  All setter methods modify the options in place. Configure all desired options before passing to `Engine::start()`.
+</Note>
+
+## Related types
+
+- [Engine](/api/engine) - Consumes the options when starting the engine

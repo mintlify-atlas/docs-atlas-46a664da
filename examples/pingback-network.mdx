@@ -1,0 +1,359 @@
+---
+title: Pingback network
+description: Complete example of running a 3-node Tashi Vertex network with transaction gossip
+---
+
+This example demonstrates how to set up and run a complete Tashi Vertex network. It shows initialization, peer configuration, transaction broadcasting, and message handling.
+
+## Overview
+
+The `pingback` example creates a node that:
+- Binds to a local address and listens for connections
+- Connects to other peers in the network
+- Sends an initial "PING" transaction
+- Receives and displays events containing transactions from the network
+- Reports consensus timing and event metadata
+
+## Complete example
+
+```rust examples/pingback.rs
+use std::str::{FromStr, from_utf8};
+
+use anyhow::anyhow;
+use clap::Parser;
+use tashi_vertex::{
+    Context, Engine, KeyPublic, KeySecret, Message, Options, Peers, Socket, Transaction,
+};
+
+#[derive(Debug, Clone)]
+struct PeerArg {
+    pub address: String,
+    pub public: KeyPublic,
+}
+
+impl FromStr for PeerArg {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (public, address) = s
+            .split_once('@')
+            .ok_or_else(|| anyhow!("Invalid peer format, expected <public_key>@<address>"))?;
+
+        let public = public.parse()?;
+        let address = address.to_string();
+
+        Ok(PeerArg { address, public })
+    }
+}
+
+#[derive(Debug, Parser)]
+struct Args {
+    #[clap(short = 'B')]
+    pub bind: String,
+
+    #[clap(short = 'K')]
+    pub key: String,
+
+    #[clap(short = 'P')]
+    pub peers: Vec<PeerArg>,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    let key = args.key.parse::<KeySecret>()?;
+
+    // initialize a set of peers for the network
+    let mut peers = Peers::with_capacity(args.peers.len())?;
+
+    for peer in &args.peers {
+        peers.insert(&peer.address, &peer.public, Default::default())?;
+    }
+
+    // add ourself to the set of peers in the network
+    peers.insert(&args.bind, &key.public(), Default::default())?;
+
+    println!(" :: Configured network for {} peers", args.peers.len() + 1);
+
+    // initialize a new Tashi Vertex (TV) context
+    // manages async. operations and resources
+    // allows for operations to complete
+    let context = Context::new()?;
+
+    println!(" :: Initialized runtime");
+
+    // bind a new socket to listen for incoming connections in the network
+    let socket = Socket::bind(&context, &args.bind).await?;
+
+    println!(" :: Bound local socket");
+
+    // configure execution options for the Tashi Vertex (TV) engine
+    let mut options = Options::default();
+    options.set_report_gossip_events(true);
+    options.set_fallen_behind_kick_s(10);
+
+    // start the engine
+    // and begin participating in the network
+    let engine = Engine::start(&context, socket, options, &key, peers)?;
+
+    println!(" :: Started the consensus engine");
+
+    // send an initial PING transaction
+    send_transaction_cstr(&engine, "PING")?;
+
+    // start waiting for messages
+    while let Some(message) = engine.recv_message().await? {
+        match message {
+            Message::Event(event) => {
+                if event.transaction_count() > 0 {
+                    println!(" > Received EVENT");
+
+                    // Print event metadata
+                    println!("    - From: {}", event.creator());
+                    println!("    - Created: {}", event.created_at());
+                    println!("    - Consensus: {}", event.consensus_at());
+                    println!("    - Transactions: {}", event.transaction_count());
+
+                    // Print each transaction
+                    for tx in event.transactions() {
+                        // All transactions are strings
+                        let tx_s = from_utf8(&tx)?;
+
+                        println!("    - >> {}", tx_s);
+                    }
+                }
+            }
+
+            Message::SyncPoint(_) => {
+                println!(" > Received SYNC POINT");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Sends a string as a null-terminated transaction to the network.
+pub fn send_transaction_cstr(engine: &Engine, s: &str) -> tashi_vertex::Result<()> {
+    let mut transaction = Transaction::allocate(s.len() + 1);
+
+    transaction[..s.len()].copy_from_slice(s.as_bytes());
+    transaction[s.len()] = 0; // null-terminate
+
+    engine.send_transaction(transaction)
+}
+```
+
+## How it works
+
+<Steps>
+  <Step title="Parse command line arguments">
+    The example uses `clap` to parse:
+    - `-B`: Local bind address (e.g., `127.0.0.1:8001`)
+    - `-K`: Secret key for this node
+    - `-P`: List of peers in format `<public_key>@<address>`
+
+    ```rust
+    let args = Args::parse();
+    let key = args.key.parse::<KeySecret>()?;
+    ```
+  </Step>
+
+  <Step title="Configure peer set">
+    Create a `Peers` collection and add all network participants, including the local node.
+
+    ```rust
+    let mut peers = Peers::with_capacity(args.peers.len())?;
+
+    for peer in &args.peers {
+        peers.insert(&peer.address, &peer.public, Default::default())?;
+    }
+
+    peers.insert(&args.bind, &key.public(), Default::default())?;
+    ```
+  </Step>
+
+  <Step title="Initialize context and socket">
+    Create a runtime context and bind a socket to listen for incoming connections.
+
+    ```rust
+    let context = Context::new()?;
+    let socket = Socket::bind(&context, &args.bind).await?;
+    ```
+  </Step>
+
+  <Step title="Configure engine options">
+    Set up execution options like gossip event reporting and timeout settings.
+
+    ```rust
+    let mut options = Options::default();
+    options.set_report_gossip_events(true);
+    options.set_fallen_behind_kick_s(10);
+    ```
+  </Step>
+
+  <Step title="Start the consensus engine">
+    Launch the engine to begin participating in consensus.
+
+    ```rust
+    let engine = Engine::start(&context, socket, options, &key, peers)?;
+    ```
+  </Step>
+
+  <Step title="Send and receive messages">
+    Send an initial transaction and enter the message processing loop.
+
+    ```rust
+    send_transaction_cstr(&engine, "PING")?;
+
+    while let Some(message) = engine.recv_message().await? {
+        // Handle Message::Event or Message::SyncPoint
+    }
+    ```
+  </Step>
+</Steps>
+
+## Running a 3-node network
+
+First, generate keys for three nodes:
+
+```bash
+# Generate keys
+cargo run --example key-generate
+# Note the output: SECRET1 / PUBLIC1
+
+cargo run --example key-generate
+# Note the output: SECRET2 / PUBLIC2
+
+cargo run --example key-generate
+# Note the output: SECRET3 / PUBLIC3
+```
+
+Then start each node in separate terminals:
+
+<Tabs>
+  <Tab title="Node 1">
+    ```bash
+    cargo run --example pingback -- \
+      -B 127.0.0.1:8001 \
+      -K SECRET1 \
+      -P PUBLIC2@127.0.0.1:8002 \
+      -P PUBLIC3@127.0.0.1:8003
+    ```
+  </Tab>
+
+  <Tab title="Node 2">
+    ```bash
+    cargo run --example pingback -- \
+      -B 127.0.0.1:8002 \
+      -K SECRET2 \
+      -P PUBLIC1@127.0.0.1:8001 \
+      -P PUBLIC3@127.0.0.1:8003
+    ```
+  </Tab>
+
+  <Tab title="Node 3">
+    ```bash
+    cargo run --example pingback -- \
+      -B 127.0.0.1:8003 \
+      -K SECRET3 \
+      -P PUBLIC1@127.0.0.1:8001 \
+      -P PUBLIC2@127.0.0.1:8002
+    ```
+  </Tab>
+</Tabs>
+
+## Example output
+
+When a node starts and receives events, you'll see:
+
+```bash
+ :: Configured network for 3 peers
+ :: Initialized runtime
+ :: Bound local socket
+ :: Started the consensus engine
+ > Received EVENT
+    - From: 7wY9zA2bC4dE6fG8hJ1kL3mN5pQ7rS9tV2wX4yZ6aB8cD1eF3gH5jK7mN9pQ2rS
+    - Created: 1234567890
+    - Consensus: 1234567895
+    - Transactions: 1
+    - >> PING
+ > Received SYNC POINT
+ > Received EVENT
+    - From: 3mN5pQ7rS9tV2wX4yZ6aB8cD1eF3gH5jK7mN9pQ2rS4tV6wY8zA1bC3dE5fG7h
+    - Created: 1234567892
+    - Consensus: 1234567897
+    - Transactions: 1
+    - >> PING
+```
+
+## Message types
+
+The engine can receive two types of messages:
+
+### Event messages
+
+Contain transactions that have reached consensus:
+
+```rust
+Message::Event(event) => {
+    println!("From: {}", event.creator());
+    println!("Created: {}", event.created_at());
+    println!("Consensus: {}", event.consensus_at());
+    println!("Transactions: {}", event.transaction_count());
+
+    for tx in event.transactions() {
+        // Process each transaction
+    }
+}
+```
+
+### Sync point messages
+
+Indicate synchronization milestones in the network:
+
+```rust
+Message::SyncPoint(_) => {
+    println!(" > Received SYNC POINT");
+}
+```
+
+<Info>
+  Events are only reported when `set_report_gossip_events(true)` is enabled in the options. Otherwise, you'll only receive sync points.
+</Info>
+
+## Key concepts
+
+### Peer format
+
+Peers are specified as `<public_key>@<address>` where:
+- `public_key` is the Base58-encoded public key
+- `address` is a valid socket address (IP:port or hostname:port)
+
+### Transaction lifecycle
+
+1. **Allocate**: Create a transaction buffer
+2. **Populate**: Write data into the buffer
+3. **Send**: Submit to the engine for gossip
+4. **Consensus**: Network reaches agreement
+5. **Receive**: Event delivered to all nodes
+
+### Engine options
+
+- `set_report_gossip_events(true)`: Receive event messages containing transactions
+- `set_fallen_behind_kick_s(10)`: Kick nodes that fall behind by 10 seconds
+
+<Note>
+  The engine runs asynchronously and handles all network communication, consensus, and event ordering automatically.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Transaction handling" href="/examples/transaction-handling">
+    Deep dive into transaction creation and processing
+  </Card>
+  <Card title="Key generation" href="/examples/key-generation">
+    Learn more about cryptographic keys
+  </Card>
+</CardGroup>

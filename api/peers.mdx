@@ -1,0 +1,126 @@
+---
+title: Peers
+description: Manage a unique set of peers in the Tashi Vertex network
+---
+
+## Overview
+
+The `Peers` struct represents a unique set of peers in the network, where each peer is identified by their network address and public key. This struct is used to configure and manage the peer list for a Tashi Vertex session.
+
+## Creating a peers collection
+
+### new()
+
+Creates a new empty set of peers.
+
+```rust
+pub fn new() -> crate::Result<Self>
+```
+
+**Returns**
+
+Returns a `Result` containing the `Peers` instance, or an error if creation fails.
+
+**Example**
+
+```rust
+use tashi_vertex::Peers;
+
+let peers = Peers::new()?;
+```
+
+### with_capacity()
+
+Creates a new empty set of peers with the specified initial capacity. This can improve performance when you know the approximate number of peers in advance.
+
+```rust
+pub fn with_capacity(capacity: usize) -> crate::Result<Self>
+```
+
+**Parameters**
+
+<ParamField path="capacity" type="usize" required>
+  The initial capacity for the peer collection. Allocating capacity upfront can reduce memory reallocations as peers are added.
+</ParamField>
+
+**Returns**
+
+Returns a `Result` containing the `Peers` instance, or an error if creation fails.
+
+**Example**
+
+```rust
+use tashi_vertex::Peers;
+
+// Create a peers collection with capacity for 10 peers
+let peers = Peers::with_capacity(10)?;
+```
+
+## Managing peers
+
+### insert()
+
+Inserts a new peer into the set.
+
+```rust
+pub fn insert(
+    &mut self,
+    address: &str,
+    public: &KeyPublic,
+    capabilities: PeerCapabilities,
+) -> crate::Result<()>
+```
+
+**Parameters**
+
+<ParamField path="address" type="&str" required>
+  The network address of the peer. Must be a valid IPv4 or IPv6 address including the port number (e.g., `"192.168.1.100:8080"` or `"[2001:db8::1]:8080"`). DNS lookup is not performed.
+</ParamField>
+
+<ParamField path="public" type="&KeyPublic" required>
+  Reference to the peer's public key, used for cryptographic identification and verification.
+</ParamField>
+
+<ParamField path="capabilities" type="PeerCapabilities" required>
+  The capabilities configuration for this peer. See [PeerCapabilities](/api/peer-capabilities) for available options.
+</ParamField>
+
+**Returns**
+
+Returns a `Result` indicating success or failure. Returns an error if the address format is invalid.
+
+**Example**
+
+```rust
+use tashi_vertex::{Peers, KeyPublic, PeerCapabilities};
+
+let mut peers = Peers::new()?;
+let peer_key = KeyPublic::from_bytes(&key_bytes)?;
+
+let capabilities = PeerCapabilities {
+    no_order: false,
+    no_logic: false,
+    public: true,
+    unkickable: false,
+};
+
+peers.insert("192.168.1.100:8080", &peer_key, capabilities)?;
+```
+
+<Note>
+  The address must be a valid IPv4 or IPv6 address with a port number. Domain names are not supported and will not be resolved.
+</Note>
+
+## Address format requirements
+
+When adding peers to the collection, the address string must follow these requirements:
+
+- **IPv4 format**: `"address:port"` (e.g., `"192.168.1.100:8080"`)
+- **IPv6 format**: `"[address]:port"` (e.g., `"[2001:db8::1]:8080"`)
+- Port number is required
+- DNS hostnames are not supported
+- No DNS lookup is performed
+
+<Info>
+  For optimal performance when creating a peer collection with a known number of peers, use `with_capacity()` instead of `new()` to pre-allocate the required memory.
+</Info>

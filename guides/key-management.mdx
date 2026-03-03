@@ -1,0 +1,552 @@
+---
+title: Key management
+description: Generate keys, parse Base58 keys, secure storage recommendations, and understand Ed25519 key formats
+---
+
+This guide covers cryptographic key management for Tashi Vertex, including key generation, parsing, storage, and security best practices.
+
+## Key types
+
+Tashi Vertex uses Ed25519 cryptography with two key types:
+
+### Secret key (`KeySecret`)
+
+Private key used for signing transactions. Must be kept secure.
+
+```rust
+use tashi_vertex::KeySecret;
+
+let secret = KeySecret::generate();
+```
+
+### Public key (`KeyPublic`)
+
+Public key derived from the secret key, used for signature verification.
+
+```rust
+let public = secret.public();
+```
+
+## Generating keys
+
+### Generate a new secret key
+
+```rust
+use tashi_vertex::KeySecret;
+
+let secret = KeySecret::generate();
+```
+
+This generates a cryptographically secure Ed25519 secret key using the system's random number generator.
+
+### Derive the public key
+
+```rust
+let public = secret.public();
+```
+
+The public key is deterministically derived from the secret key using Ed25519 mathematics.
+
+### Complete key pair generation
+
+```rust
+use tashi_vertex::KeySecret;
+
+fn generate_keypair() -> (KeySecret, String) {
+    let secret = KeySecret::generate();
+    let public = secret.public().to_string();
+    (secret, public)
+}
+
+let (secret_key, public_key) = generate_keypair();
+println!("Public key: {}", public_key);
+```
+
+<Warning>
+Never log or print secret keys in production. The example above should only be used for initial key generation.
+</Warning>
+
+## Key formats
+
+### DER encoding
+
+Keys are internally stored in DER (Distinguished Encoding Rules) format:
+
+- **Secret key DER:** 51 bytes
+- **Public key DER:** 91 bytes
+
+```rust
+use tashi_vertex::{KeySecret, KeyPublic};
+
+// Secret key to DER
+let secret = KeySecret::generate();
+let der_bytes = secret.to_der_vec()?;
+assert_eq!(der_bytes.len(), 51);
+
+// Public key to DER
+let public = secret.public();
+let der_bytes = public.to_der_vec()?;
+assert_eq!(der_bytes.len(), 91);
+```
+
+### Base58 encoding
+
+For human-readable representation, keys are encoded in Base58:
+
+- **Secret key Base58:** 69 characters (approximately)
+- **Public key Base58:** 123 characters (approximately)
+
+```rust
+// Convert to Base58 string
+let secret_b58 = secret.to_string();
+let public_b58 = public.to_string();
+
+println!("Secret (Base58): {}", secret_b58);
+println!("Public (Base58): {}", public_b58);
+```
+
+<Note>
+Base58 encoding is used because it avoids visually similar characters (0/O, l/1) and is more compact than Base64 while remaining human-readable.
+</Note>
+
+## Parsing keys
+
+### From Base58 strings
+
+The most common way to load keys:
+
+```rust
+use tashi_vertex::{KeySecret, KeyPublic};
+
+// Parse secret key
+let secret: KeySecret = "base58_secret_key_here".parse()?;
+
+// Parse public key
+let public: KeyPublic = "base58_public_key_here".parse()?;
+```
+
+Using `FromStr` trait:
+
+```rust
+use std::str::FromStr;
+
+let secret = KeySecret::from_str("base58_secret_key_here")?;
+let public = KeyPublic::from_str("base58_public_key_here")?;
+```
+
+### From DER bytes
+
+For advanced use cases:
+
+```rust
+// Parse secret key from DER
+let der_bytes: &[u8] = &[/* 51 bytes */];
+let secret = KeySecret::from_der(der_bytes)?;
+
+// Parse public key from DER
+let der_bytes: &[u8] = &[/* 91 bytes */];
+let public = KeyPublic::from_der(der_bytes)?;
+```
+
+### From environment variables
+
+```rust
+use std::env;
+use tashi_vertex::KeySecret;
+
+let secret: KeySecret = env::var("NODE_SECRET_KEY")?.parse()?;
+```
+
+### From configuration files
+
+<CodeGroup>
+```rust TOML config
+use serde::Deserialize;
+use tashi_vertex::KeySecret;
+
+#[derive(Deserialize)]
+struct Config {
+    #[serde(deserialize_with = "deserialize_key_secret")]
+    secret_key: KeySecret,
+}
+
+fn deserialize_key_secret<'de, D>(deserializer: D) -> Result<KeySecret, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    s.parse().map_err(serde::de::Error::custom)
+}
+
+let config: Config = toml::from_str(include_str!("config.toml"))?;
+```
+
+```toml config.toml
+secret_key = "your_base58_secret_key_here"
+```
+</CodeGroup>
+
+### From command-line arguments
+
+```rust
+use clap::Parser;
+use tashi_vertex::KeySecret;
+
+#[derive(Parser)]
+struct Args {
+    #[clap(short = 'K', long)]
+    key: KeySecret,
+}
+
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    println!("Loaded key: {:?}", args.key);
+    Ok(())
+}
+```
+
+Run with:
+
+```bash
+cargo run -- --key "base58_secret_key_here"
+```
+
+## Secure storage
+
+### Environment variables (recommended)
+
+Store keys in environment variables for development and deployment:
+
+```bash
+# .env file (DO NOT commit to git)
+NODE_SECRET_KEY=your_base58_secret_key_here
+```
+
+```rust
+use dotenv::dotenv;
+use tashi_vertex::KeySecret;
+
+dotenv().ok();
+let secret: KeySecret = std::env::var("NODE_SECRET_KEY")?.parse()?;
+```
+
+<Warning>
+Add `.env` to `.gitignore` to prevent accidentally committing secrets.
+</Warning>
+
+### File system with restricted permissions
+
+Store keys in files with strict permissions:
+
+```bash
+# Create key file with restricted permissions
+echo "your_base58_secret_key" > /etc/tashi/secret.key
+chmod 600 /etc/tashi/secret.key
+chown tashi:tashi /etc/tashi/secret.key
+```
+
+```rust
+use std::fs;
+use tashi_vertex::KeySecret;
+
+let key_str = fs::read_to_string("/etc/tashi/secret.key")?
+    .trim()
+    .to_string();
+let secret: KeySecret = key_str.parse()?;
+```
+
+### Hardware security modules (HSM)
+
+For production systems, consider using HSMs or key management services:
+
+- AWS KMS
+- Azure Key Vault
+- Google Cloud KMS
+- HashiCorp Vault
+- YubiHSM
+
+### Encrypted storage
+
+Encrypt keys at rest:
+
+```rust
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce
+};
+use tashi_vertex::KeySecret;
+
+fn encrypt_key(secret: &KeySecret, password: &str) -> anyhow::Result<Vec<u8>> {
+    // Derive encryption key from password (use proper KDF in production)
+    let key = derive_key_from_password(password)?;
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = Nonce::from_slice(b"unique nonce");
+    
+    let der = secret.to_der_vec()?;
+    let ciphertext = cipher.encrypt(nonce, der.as_ref())?;
+    
+    Ok(ciphertext)
+}
+
+fn decrypt_key(ciphertext: &[u8], password: &str) -> anyhow::Result<KeySecret> {
+    let key = derive_key_from_password(password)?;
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = Nonce::from_slice(b"unique nonce");
+    
+    let plaintext = cipher.decrypt(nonce, ciphertext)?;
+    KeySecret::from_der(&plaintext)
+}
+```
+
+<Note>
+This example is simplified. Use proper key derivation functions (KDF) like Argon2 in production.
+</Note>
+
+## Key rotation
+
+### Generate a new key
+
+```rust
+use tashi_vertex::KeySecret;
+
+let old_key: KeySecret = std::env::var("NODE_SECRET_KEY")?.parse()?;
+let new_key = KeySecret::generate();
+
+println!("Old public key: {}", old_key.public());
+println!("New public key: {}", new_key.public());
+println!("New secret key: {}", new_key);
+```
+
+### Migration process
+
+<Steps>
+  <Step title="Generate new key">
+    Create a new secret key while keeping the old one active.
+  </Step>
+  
+  <Step title="Update peer configurations">
+    Distribute the new public key to all peers in the network.
+  </Step>
+  
+  <Step title="Restart with new key">
+    Update your node configuration to use the new secret key.
+  </Step>
+  
+  <Step title="Verify connectivity">
+    Ensure your node can still communicate with the network.
+  </Step>
+  
+  <Step title="Decommission old key">
+    Once verified, securely delete the old secret key.
+  </Step>
+</Steps>
+
+## Security best practices
+
+### Never commit secrets to version control
+
+Add these to `.gitignore`:
+
+```gitignore
+# Secret keys
+*.key
+secret_key.txt
+.env
+.env.local
+
+# Configuration with secrets
+config.production.toml
+secrets/
+```
+
+### Use different keys per environment
+
+```rust
+use tashi_vertex::KeySecret;
+
+let key = match std::env::var("ENV")?.as_str() {
+    "production" => std::env::var("PROD_SECRET_KEY")?.parse()?,
+    "staging" => std::env::var("STAGING_SECRET_KEY")?.parse()?,
+    "development" => std::env::var("DEV_SECRET_KEY")?.parse()?,
+    _ => return Err(anyhow::anyhow!("Unknown environment")),
+};
+```
+
+### Implement key lifecycle management
+
+<Accordion title="Key lifecycle checklist">
+- **Generation:** Use cryptographically secure RNG
+- **Storage:** Encrypt at rest, restrict file permissions
+- **Access:** Limit to necessary processes only
+- **Rotation:** Schedule regular key rotation
+- **Revocation:** Have a plan for compromised keys
+- **Deletion:** Securely wipe old keys from memory and disk
+</Accordion>
+
+### Validate keys on startup
+
+```rust
+use tashi_vertex::KeySecret;
+
+fn load_and_validate_key() -> anyhow::Result<KeySecret> {
+    let key_str = std::env::var("NODE_SECRET_KEY")?;
+    
+    // Parse the key
+    let secret: KeySecret = key_str.parse()?;
+    
+    // Derive public key to verify key is valid
+    let public = secret.public();
+    
+    println!("Loaded key with public key: {}", public);
+    
+    Ok(secret)
+}
+```
+
+### Memory safety
+
+Zero out key material when dropping:
+
+```rust
+use zeroize::Zeroize;
+
+struct SecureKeyWrapper {
+    key_str: String,
+}
+
+impl Drop for SecureKeyWrapper {
+    fn drop(&mut self) {
+        self.key_str.zeroize();
+    }
+}
+```
+
+<Note>
+The `KeySecret` struct contains raw key material. Avoid cloning or copying unless necessary.
+</Note>
+
+## Debugging key issues
+
+### Verify key format
+
+```rust
+use tashi_vertex::KeySecret;
+
+fn validate_key_string(s: &str) -> bool {
+    s.parse::<KeySecret>().is_ok()
+}
+
+let is_valid = validate_key_string("base58_key_here");
+println!("Key is valid: {}", is_valid);
+```
+
+### Compare public keys
+
+```rust
+let secret: KeySecret = "secret_base58".parse()?;
+let expected_public: String = "public_base58".to_string();
+let actual_public = secret.public().to_string();
+
+assert_eq!(actual_public, expected_public, "Public key mismatch!");
+```
+
+### Debug key representation
+
+```rust
+use tashi_vertex::KeySecret;
+
+let secret: KeySecret = std::env::var("NODE_SECRET_KEY")?.parse()?;
+
+// Debug trait shows quoted string without revealing key
+println!("Secret key: {:?}", secret);
+
+// Display trait shows Base58 encoding (be careful!)
+// println!("Secret key (Base58): {}", secret); // Don't use in production!
+
+// Public key is safe to display
+println!("Public key: {}", secret.public());
+```
+
+## Example: Complete key management CLI
+
+```rust
+use clap::{Parser, Subcommand};
+use tashi_vertex::KeySecret;
+
+#[derive(Parser)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Generate a new keypair
+    Generate,
+    
+    /// Show public key for a secret key
+    ShowPublic {
+        #[clap(short, long)]
+        secret: KeySecret,
+    },
+    
+    /// Validate a secret key
+    Validate {
+        #[clap(short, long)]
+        secret: String,
+    },
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    
+    match cli.command {
+        Commands::Generate => {
+            let secret = KeySecret::generate();
+            let public = secret.public();
+            
+            println!("Generated new keypair:");
+            println!("Secret key: {}", secret);
+            println!("Public key: {}", public);
+            println!();
+            println!("⚠️  Store the secret key securely!");
+        }
+        
+        Commands::ShowPublic { secret } => {
+            let public = secret.public();
+            println!("Public key: {}", public);
+        }
+        
+        Commands::Validate { secret } => {
+            match secret.parse::<KeySecret>() {
+                Ok(key) => {
+                    println!("✓ Valid secret key");
+                    println!("Public key: {}", key.public());
+                }
+                Err(e) => {
+                    println!("✗ Invalid secret key: {}", e);
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+```
+
+Run with:
+
+```bash
+# Generate new keypair
+cargo run -- generate
+
+# Show public key
+cargo run -- show-public --secret "base58_secret_here"
+
+# Validate key
+cargo run -- validate --secret "base58_secret_here"
+```
+
+## Next steps
+
+Now that you understand key management, learn how to use keys when [Running a node](/guides/running-a-node) and setting up [Network configuration](/guides/network-setup).

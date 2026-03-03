@@ -1,0 +1,76 @@
+---
+title: Message
+description: Enum representing incoming consensus messages from the Tashi Vertex network
+---
+
+## Overview
+
+The `Message` enum represents messages received from the Tashi Vertex consensus network. Messages can be either events that have reached consensus or sync points that indicate network management decisions.
+
+## Variants
+
+### Event
+
+Contains an [`Event`](/api/event) that has reached consensus in the network.
+
+```rust
+Message::Event(Event)
+```
+
+### SyncPoint
+
+Contains a [`SyncPoint`](/api/sync-point) representing a consensus decision about network management.
+
+```rust
+Message::SyncPoint(SyncPoint)
+```
+
+## Usage
+
+Messages are received through the [`Engine::recv_message()`](/api/engine) method:
+
+```rust
+use tashi_vertex::{Engine, Message};
+
+// Receive the next message from the network
+let message = engine.recv_message().await?;
+
+match message {
+    Some(Message::Event(event)) => {
+        // Process consensus event
+        println!("Event reached consensus at: {}", event.consensus_at());
+        for transaction in event.transactions() {
+            // Process each transaction in the event
+        }
+    }
+    Some(Message::SyncPoint(sync_point)) => {
+        // Handle sync point for session management
+        println!("Received sync point");
+    }
+    None => {
+        // No message received (engine may be shutting down)
+    }
+}
+```
+
+<Note>
+The `Message::recv()` method is internal and not exposed in the public API. Use `Engine::recv_message()` instead to receive messages.
+</Note>
+
+## Pattern matching
+
+Since `Message` is an enum, you can use pattern matching to handle different message types:
+
+```rust
+loop {
+    match engine.recv_message().await? {
+        Some(Message::Event(event)) => {
+            // Handle event
+        }
+        Some(Message::SyncPoint(sync_point)) => {
+            // Handle sync point
+        }
+        None => break,
+    }
+}
+```

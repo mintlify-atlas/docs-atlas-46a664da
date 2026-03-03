@@ -1,0 +1,144 @@
+---
+title: KeyPublic
+description: Ed25519 public key for verifying signatures in Tashi Vertex
+---
+
+`KeyPublic` represents an Ed25519 public key used for verifying signatures in Tashi Vertex. Public keys can be derived from secret keys, parsed from Base58-encoded strings, and shared with network participants.
+
+## Deriving from secret keys
+
+The most common way to obtain a `KeyPublic` is by deriving it from a `KeySecret`:
+
+```rust
+use tashi_vertex::KeySecret;
+
+let secret = KeySecret::generate();
+let public = secret.public();
+```
+
+## Methods
+
+### from_der
+
+```rust
+pub fn from_der(der: &[u8]) -> crate::Result<Self>
+```
+
+Parses a public key from DER-encoded bytes.
+
+<ParamField path="der" type="&[u8]">
+  DER-encoded public key bytes (91 bytes for Ed25519 keys)
+</ParamField>
+
+**Returns**
+
+- `Ok(KeyPublic)` if parsing succeeds
+- `Err(Error)` if the DER format is invalid
+
+**Example**
+
+```rust
+let der_bytes: &[u8] = &[/* 91 bytes of DER-encoded key */];
+let public = KeyPublic::from_der(der_bytes)?;
+```
+
+### to_der
+
+```rust
+pub fn to_der(&self, output: &mut [u8]) -> crate::Result<()>
+```
+
+Formats the public key to DER format, writing to the provided output buffer.
+
+<ParamField path="output" type="&mut [u8]">
+  Output buffer to write DER-encoded bytes (must be at least 91 bytes)
+</ParamField>
+
+**Returns**
+
+- `Ok(())` if serialization succeeds
+- `Err(Error)` if the output buffer is too small
+
+### to_der_vec
+
+```rust
+pub fn to_der_vec(&self) -> crate::Result<Vec<u8>>
+```
+
+Formats the public key to DER format as a newly allocated vector.
+
+**Returns**
+
+- `Ok(Vec<u8>)` containing 91 bytes of DER-encoded key data
+- `Err(Error)` if serialization fails
+
+**Example**
+
+```rust
+let public = secret.public();
+let der_bytes = public.to_der_vec()?;
+assert_eq!(der_bytes.len(), 91);
+```
+
+## Parsing from strings
+
+`KeyPublic` implements `FromStr`, allowing you to parse Base58-encoded keys directly:
+
+```rust
+use std::str::FromStr;
+use tashi_vertex::KeyPublic;
+
+let public_str = "aSq9DsNNvGhYPQA7q4E1izcs45NYgwqWvBEd...";
+let public = KeyPublic::from_str(public_str)?;
+
+// Or using the parse() method
+let public: KeyPublic = public_str.parse()?;
+```
+
+## Display formatting
+
+`KeyPublic` implements `Display` and `Debug`, formatting the key as a Base58-encoded DER string:
+
+```rust
+let public = secret.public();
+println!("Public: {}", public); // Base58-encoded DER (124 characters)
+println!("Debug: {:?}", public); // Quoted Base58 string
+```
+
+<Info>
+Public keys are safe to share and distribute. They are used by other network participants to verify your signatures and identify your node.
+</Info>
+
+## Clone and Copy
+
+`KeyPublic` implements both `Clone` and `Copy`, making it lightweight to pass around:
+
+```rust
+let public1 = secret.public();
+let public2 = public1; // Copy
+let public3 = public1.clone(); // Clone
+```
+
+## Key format
+
+- **Algorithm**: Ed25519
+- **DER length**: 91 bytes
+- **Base58 length**: 124 characters
+- **Encoding**: Base58-encoded DER format for string representation
+
+## Usage in peer configuration
+
+Public keys are used when configuring network peers:
+
+```rust
+use tashi_vertex::{Peers, KeyPublic};
+
+let mut peers = Peers::new()?;
+let peer_key: KeyPublic = "aSq9DsNNvGhYPQA7q4E1izcs45NYgwqWvBEd...".parse()?;
+peers.insert("127.0.0.1:9001", &peer_key, Default::default())?;
+```
+
+## See also
+
+- [KeySecret](/api/key-secret) - Ed25519 secret key for signing
+- [Base58](/api/base58) - Encoding/decoding utilities

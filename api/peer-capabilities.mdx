@@ -1,0 +1,162 @@
+---
+title: PeerCapabilities
+description: Configure capabilities and behavior for network peers
+---
+
+## Overview
+
+The `PeerCapabilities` struct defines the capabilities and behavioral characteristics of a peer in the Tashi Vertex network. These flags control how a peer participates in consensus, application logic, network topology, and session management.
+
+## Structure definition
+
+```rust
+#[derive(Default)]
+pub struct PeerCapabilities {
+    pub no_order: bool,
+    pub no_logic: bool,
+    pub public: bool,
+    pub unkickable: bool,
+}
+```
+
+## Capability flags
+
+### no_order
+
+```rust
+pub no_order: bool
+```
+
+When set to `true`, the peer does not contribute to determining the finalized order of events. This is useful for peers that participate in the network but should not influence consensus ordering.
+
+**Use cases:**
+- Observer nodes that monitor the network without participating in consensus
+- Light clients that consume events but don't help order them
+- Testing or monitoring infrastructure
+
+**Default:** `false`
+
+### no_logic
+
+```rust
+pub no_logic: bool
+```
+
+When set to `true`, the peer does not know application logic. This indicates the peer is not executing or validating application-specific logic and may only be participating at the protocol level.
+
+**Use cases:**
+- Infrastructure nodes that relay messages without processing application state
+- Nodes that handle only network routing and message passing
+- Specialized nodes with limited functionality
+
+**Default:** `false`
+
+### public
+
+```rust
+pub public: bool
+```
+
+When set to `true`, the peer is marked as having a stable public address (not behind NAT). This helps the network understand which peers can accept incoming connections.
+
+**Use cases:**
+- Nodes with public IP addresses that can accept direct connections
+- Server nodes that act as connection hubs
+- Bootstrap or seed nodes for network discovery
+
+**Default:** `false`
+
+### unkickable
+
+```rust
+pub unkickable: bool
+```
+
+When set to `true`, the peer cannot be kicked from the session. This provides protection against removal and ensures the peer remains in the network.
+
+**Use cases:**
+- Critical infrastructure nodes that must remain in the session
+- Authority nodes that are required for network operation
+- Permanent peers that should never be removed
+
+**Default:** `false`
+
+## Examples
+
+### Creating a standard peer
+
+```rust
+use tashi_vertex::PeerCapabilities;
+
+let capabilities = PeerCapabilities {
+    no_order: false,
+    no_logic: false,
+    public: true,
+    unkickable: false,
+};
+```
+
+### Creating an observer peer
+
+```rust
+use tashi_vertex::PeerCapabilities;
+
+// Observer that doesn't participate in ordering
+let observer = PeerCapabilities {
+    no_order: true,
+    no_logic: true,
+    public: false,
+    unkickable: false,
+};
+```
+
+### Creating a critical infrastructure peer
+
+```rust
+use tashi_vertex::PeerCapabilities;
+
+// Public node that cannot be removed
+let infrastructure = PeerCapabilities {
+    no_order: false,
+    no_logic: false,
+    public: true,
+    unkickable: true,
+};
+```
+
+### Using default capabilities
+
+```rust
+use tashi_vertex::PeerCapabilities;
+
+// All flags default to false
+let default_capabilities = PeerCapabilities::default();
+```
+
+## Combining with Peers
+
+PeerCapabilities are used when inserting peers into a `Peers` collection:
+
+```rust
+use tashi_vertex::{Peers, KeyPublic, PeerCapabilities};
+
+let mut peers = Peers::new()?;
+let peer_key = KeyPublic::from_bytes(&key_bytes)?;
+
+let capabilities = PeerCapabilities {
+    no_order: false,
+    no_logic: false,
+    public: true,
+    unkickable: false,
+};
+
+peers.insert("192.168.1.100:8080", &peer_key, capabilities)?;
+```
+
+<Note>
+  The `PeerCapabilities` struct implements the `Default` trait, so you can use `PeerCapabilities::default()` to create an instance with all flags set to `false`.
+</Note>
+
+<Info>
+  Capability flags are converted to internal bit flags when passed to the underlying C API. The flags are: `PEER_NO_ORDER` (1 &lt;&lt; 1), `PEER_NO_LOGIC` (1 &lt;&lt; 2), `PEER_PUBLIC` (1 &lt;&lt; 3), and `PEER_UNKICKABLE` (1 &lt;&lt; 4).
+</Info>

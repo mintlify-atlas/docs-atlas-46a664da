@@ -1,0 +1,73 @@
+---
+title: Socket
+description: Network socket handle for Tashi Vertex communication
+---
+
+The `Socket` provides network connectivity for Tashi Vertex, allowing the consensus engine to communicate with peers in the network.
+
+## Methods
+
+### bind
+
+Binds a Tashi Vertex socket to the specified address.
+
+```rust
+pub fn bind(context: &Context, address: &str) -> impl Future<Output = crate::Result<Self>>
+```
+
+#### Parameters
+
+<ParamField body="context" type="&Context" required>
+  Reference to a Tashi Vertex context
+</ParamField>
+
+<ParamField body="address" type="&str" required>
+  The address to bind to. Must be a valid IPv4 or IPv6 address including the port number (e.g., "0.0.0.0:8080" or "[::]:8080").
+</ParamField>
+
+#### Returns
+
+<ParamField body="return" type="Future<Output = Result<Socket>>">
+  Returns a `Future` that resolves to a `Socket` on success, or an `Error::SocketBind` if the bind operation fails.
+</ParamField>
+
+<Note>
+  The address must be a valid IPv4 or IPv6 address, including the port number. DNS lookup is not performed.
+</Note>
+
+#### Example
+
+```rust
+use tashi_vertex::{Context, Socket};
+
+let context = Context::new()?;
+let socket = Socket::bind(&context, "0.0.0.0:8080").await?;
+```
+
+<Tabs>
+  <Tab title="IPv4">
+    ```rust
+    let socket = Socket::bind(&context, "0.0.0.0:8080").await?;
+    ```
+  </Tab>
+  <Tab title="IPv6">
+    ```rust
+    let socket = Socket::bind(&context, "[::]:8080").await?;
+    ```
+  </Tab>
+  <Tab title="Localhost">
+    ```rust
+    let socket = Socket::bind(&context, "127.0.0.1:8080").await?;
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  The socket bind operation is asynchronous and must be awaited. Ensure your runtime supports async operations.
+</Warning>
+
+## Related types
+
+- [Context](/api/context) - Required to create a socket
+- [Engine](/api/engine) - Consumes the socket when starting the engine
+- [Error](/api/error) - Returns `Error::SocketBind` on failure

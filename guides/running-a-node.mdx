@@ -1,0 +1,263 @@
+---
+title: Running a node
+description: Learn how to start a consensus node, bind sockets, and participate in the Tashi Vertex network
+---
+
+This guide walks you through running a Tashi Vertex consensus node from initialization to processing network messages.
+
+## Overview
+
+A Tashi Vertex node requires four main components:
+
+1. A runtime context for managing async operations
+2. A network socket bound to an address
+3. A consensus engine configured with options
+4. A message loop to process events and sync points
+
+## Initialize the runtime
+
+First, create a `Context` to manage async operations and resources:
+
+```rust
+use tashi_vertex::Context;
+
+let context = Context::new()?;
+```
+
+The context allows operations to complete and manages the underlying async runtime.
+
+## Parse your secret key
+
+Load your node's secret key from a Base58-encoded string:
+
+```rust
+use tashi_vertex::KeySecret;
+
+let key = "YOUR_BASE58_SECRET_KEY".parse::<KeySecret>()?;
+```
+
+<Note>
+See the [Key management](/guides/key-management) guide for details on generating and securing keys.
+</Note>
+
+## Configure the peer network
+
+Set up the initial peer set including other nodes and yourself:
+
+```rust
+use tashi_vertex::{Peers, KeyPublic};
+
+// Initialize peers with capacity
+let mut peers = Peers::with_capacity(3)?;
+
+// Add remote peers
+let peer_key: KeyPublic = "PEER_BASE58_PUBLIC_KEY".parse()?;
+peers.insert("192.168.1.100:8000", &peer_key, Default::default())?;
+
+// Add yourself to the peer set
+peers.insert("0.0.0.0:8000", &key.public(), Default::default())?;
+```
+
+<Warning>
+Peer addresses must be valid IPv4 or IPv6 addresses with port numbers. DNS lookups are not performed.
+</Warning>
+
+## Bind a network socket
+
+Bind a socket to listen for incoming connections:
+
+```rust
+use tashi_vertex::Socket;
+
+let bind_address = "0.0.0.0:8000";
+let socket = Socket::bind(&context, bind_address).await?;
+```
+
+The socket will accept connections from other nodes in the network.
+
+## Configure engine options
+
+Set up execution options for the consensus engine:
+
+```rust
+use tashi_vertex::Options;
+
+let mut options = Options::default();
+options.set_report_gossip_events(true);
+options.set_fallen_behind_kick_s(10);
+```
+
+<Note>
+See the [Configuration](/guides/configuration) guide for all available options and their defaults.
+</Note>
+
+## Start the consensus engine
+
+Start the engine and begin participating in consensus:
+
+```rust
+use tashi_vertex::Engine;
+
+let engine = Engine::start(&context, socket, options, &key, peers)?;
+```
+
+The engine immediately begins:
+- Connecting to peers
+- Participating in consensus
+- Processing transactions
+
+## Send transactions
+
+Submit transactions to the network:
+
+```rust
+use tashi_vertex::Transaction;
+
+let data = b"Hello, Tashi!";
+let mut transaction = Transaction::allocate(data.len() + 1);
+transaction[..data.len()].copy_from_slice(data);
+transaction[data.len()] = 0; // null-terminate
+
+engine.send_transaction(transaction)?;
+```
+
+## Receive messages
+
+Process messages from the network in a loop:
+
+```rust
+use tashi_vertex::Message;
+use std::str::from_utf8;
+
+while let Some(message) = engine.recv_message().await? {
+    match message {
+        Message::Event(event) => {
+            println!("Received event from: {}", event.creator());
+            println!("Created at: {}", event.created_at());
+            println!("Consensus at: {}", event.consensus_at());
+            println!("Transaction count: {}", event.transaction_count());
+            
+            for tx in event.transactions() {
+                let tx_str = from_utf8(&tx)?;
+                println!("Transaction: {}", tx_str);
+            }
+        }
+        
+        Message::SyncPoint(_) => {
+            println!("Received sync point");
+        }
+    }
+}
+```
+
+### Event fields
+
+<Accordion title="Available event methods">
+- `creator()` - Returns the `KeyPublic` of the event creator
+- `created_at()` - Timestamp when the event was created
+- `consensus_at()` - Timestamp when consensus was reached
+- `transaction_count()` - Number of transactions in the event
+- `transactions()` - Iterator over transaction byte slices
+</Accordion>
+
+## Complete example
+
+Here's a complete pingback node that sends and receives messages:
+
+<CodeGroup>
+```rust Pingback node
+use std::str::from_utf8;
+use tashi_vertex::{
+    Context, Engine, KeySecret, Message, Options, Peers, Socket, Transaction,
+};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Parse secret key
+    let key = std::env::var("NODE_KEY")?.parse::<KeySecret>()?;
+    
+    // Initialize peers
+    let mut peers = Peers::with_capacity(2)?;
+    let peer_key = std::env::var("PEER_KEY")?.parse()?;
+    peers.insert("192.168.1.100:8000", &peer_key, Default::default())?;
+    peers.insert("0.0.0.0:8000", &key.public(), Default::default())?;
+    
+    println!("Configured network for {} peers", 2);
+    
+    // Initialize runtime
+    let context = Context::new()?;
+    println!("Initialized runtime");
+    
+    // Bind socket
+    let socket = Socket::bind(&context, "0.0.0.0:8000").await?;
+    println!("Bound local socket");
+    
+    // Configure options
+    let mut options = Options::default();
+    options.set_report_gossip_events(true);
+    options.set_fallen_behind_kick_s(10);
+    
+    // Start engine
+    let engine = Engine::start(&context, socket, options, &key, peers)?;
+    println!("Started the consensus engine");
+    
+    // Send initial transaction
+    send_transaction_str(&engine, "PING")?;
+    
+    // Process messages
+    while let Some(message) = engine.recv_message().await? {
+        match message {
+            Message::Event(event) => {
+                if event.transaction_count() > 0 {
+                    println!("Received EVENT");
+                    println!("  From: {}", event.creator());
+                    println!("  Transactions: {}", event.transaction_count());
+                    
+                    for tx in event.transactions() {
+                        let tx_s = from_utf8(&tx)?;
+                        println!("  >> {}", tx_s);
+                    }
+                }
+            }
+            Message::SyncPoint(_) => {
+                println!("Received SYNC POINT");
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+fn send_transaction_str(engine: &Engine, s: &str) -> tashi_vertex::Result<()> {
+    let mut transaction = Transaction::allocate(s.len() + 1);
+    transaction[..s.len()].copy_from_slice(s.as_bytes());
+    transaction[s.len()] = 0; // null-terminate
+    engine.send_transaction(transaction)
+}
+```
+
+```bash Running the node
+# Set environment variables
+export NODE_KEY="your_base58_secret_key"
+export PEER_KEY="peer_base58_public_key"
+
+# Run the node
+cargo run --example pingback
+```
+</CodeGroup>
+
+## Next steps
+
+<Steps>
+  <Step title="Configure peers">
+    Learn about peer capabilities and network topology in [Network setup](/guides/network-setup)
+  </Step>
+  
+  <Step title="Tune performance">
+    Optimize engine parameters in [Configuration](/guides/configuration)
+  </Step>
+  
+  <Step title="Manage keys">
+    Set up secure key storage in [Key management](/guides/key-management)
+  </Step>
+</Steps>

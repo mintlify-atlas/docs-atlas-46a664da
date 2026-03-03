@@ -1,0 +1,170 @@
+---
+title: SyncPoint
+description: Represents a consensus decision about network session management
+---
+
+## Overview
+
+The `SyncPoint` struct represents a decision or action related to the management of the consensus engine that a super-majority of peers agreed upon. Sync points are used for coordinating network-wide state transitions and session management.
+
+## What is a sync point?
+
+A sync point is a special type of consensus message that indicates agreement among peers about network management decisions, such as:
+
+- Session boundaries
+- Network configuration changes
+- Coordination points for distributed operations
+- Administrative actions that require consensus
+
+Unlike [`Event`](/api/event) messages which contain application transactions, sync points are about the consensus protocol itself and how the network is managed.
+
+## Receiving sync points
+
+Sync points are received through the same message stream as events:
+
+```rust
+use tashi_vertex::{Engine, Message};
+
+while let Some(message) = engine.recv_message().await? {
+    match message {
+        Message::SyncPoint(sync_point) => {
+            // Handle sync point
+            println!("Received sync point for session management");
+            
+            // Perform any necessary state transitions or cleanup
+            // based on the sync point
+        }
+        Message::Event(event) => {
+            // Handle regular consensus events
+        }
+        None => break,
+    }
+}
+```
+
+## Use cases
+
+### Session boundaries
+
+Sync points can mark the end of one consensus session and the beginning of another:
+
+```rust
+let mut current_session_id = 0;
+
+while let Some(message) = engine.recv_message().await? {
+    match message {
+        Message::SyncPoint(_) => {
+            // Session boundary reached
+            current_session_id += 1;
+            println!("Starting session {}", current_session_id);
+            
+            // Perform session transition logic
+            flush_pending_state();
+            initialize_new_session();
+        }
+        Message::Event(event) => {
+            // Process events within the current session
+            process_event(event, current_session_id);
+        }
+        None => break,
+    }
+}
+```
+
+### Coordinating network-wide operations
+
+Sync points ensure all peers perform certain operations at the same logical point in consensus:
+
+```rust
+match engine.recv_message().await? {
+    Some(Message::SyncPoint(_)) => {
+        // All peers in the network will receive this sync point
+        // at the same position in the consensus ordering
+        
+        // Safe to perform coordinated operations like:
+        // - Taking a snapshot of application state
+        // - Rotating cryptographic keys
+        // - Updating network configuration
+        // - Starting a new epoch
+    }
+    Some(Message::Event(event)) => {
+        // Regular event processing
+    }
+    None => {}
+}
+```
+
+## Current limitations
+
+<Note>
+The current `SyncPoint` struct has a minimal public API. The internal handle is used by the Tashi Vertex library to manage consensus state, but specific sync point data and methods are not yet exposed in the public API.
+</Note>
+
+As the Tashi Vertex SDK evolves, additional methods may be added to `SyncPoint` to expose:
+
+- Sync point type or category
+- Associated metadata
+- Timestamp information
+- Session identifiers
+
+## Example: Session management
+
+Here's a complete example of using sync points for session management:
+
+```rust
+use tashi_vertex::{Engine, Message};
+use std::collections::HashMap;
+
+struct Application {
+    engine: Engine,
+    current_session: u64,
+    session_data: HashMap<u64, SessionState>,
+}
+
+impl Application {
+    async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        loop {
+            match self.engine.recv_message().await? {
+                Some(Message::Event(event)) => {
+                    // Process event in current session
+                    self.process_event(event)?;
+                }
+                
+                Some(Message::SyncPoint(_)) => {
+                    // Finalize current session
+                    self.finalize_session(self.current_session)?;
+                    
+                    // Move to next session
+                    self.current_session += 1;
+                    self.initialize_session(self.current_session)?;
+                    
+                    println!("Session transition: now in session {}", 
+                             self.current_session);
+                }
+                
+                None => {
+                    // Engine is shutting down
+                    break;
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn process_event(&mut self, event: Event) -> Result<(), Box<dyn std::error::Error>> {
+        // Process event within current session
+        Ok(())
+    }
+    
+    fn finalize_session(&mut self, session_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        // Finalize session state
+        Ok(())
+    }
+    
+    fn initialize_session(&mut self, session_id: u64) -> Result<(), Box<dyn std::error::Error>> {
+        // Initialize new session
+        Ok(())
+    }
+}
+```

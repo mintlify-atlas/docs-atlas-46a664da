@@ -1,0 +1,233 @@
+---
+title: Engine
+description: Handle for the Tashi Vertex consensus engine
+---
+
+The `Engine` is the core component that runs the Tashi Vertex consensus algorithm. It manages the network communication, transaction processing, and event ordering.
+
+## Methods
+
+### start
+
+Starts the consensus engine.
+
+```rust
+pub fn start(
+    context: &Context,
+    socket: Socket,
+    options: Options,
+    secret: &KeySecret,
+    peers: Peers,
+) -> crate::Result<Self>
+```
+
+#### Parameters
+
+<ParamField body="context" type="&Context" required>
+  Reference to a Tashi Vertex context
+</ParamField>
+
+<ParamField body="socket" type="Socket" required>
+  A bound socket for network communication. Ownership is transferred to the engine.
+</ParamField>
+
+<ParamField body="options" type="Options" required>
+  Configuration options for the engine. Ownership is transferred to the engine.
+</ParamField>
+
+<ParamField body="secret" type="&KeySecret" required>
+  The secret key used for signing transactions and events
+</ParamField>
+
+<ParamField body="peers" type="Peers" required>
+  The set of peer nodes to connect to. Ownership is transferred to the engine.
+</ParamField>
+
+#### Returns
+
+<ParamField body="return" type="Result<Engine>">
+  Returns an `Engine` instance on success, or an `Error` if the engine fails to start.
+</ParamField>
+
+<Note>
+  The `socket`, `options`, and `peers` parameters transfer ownership to the engine. They cannot be used after calling `start()`.
+</Note>
+
+#### Example
+
+```rust
+use tashi_vertex::{Context, Socket, Options, KeySecret, Peers, Engine};
+
+let context = Context::new()?;
+let socket = Socket::bind(&context, "0.0.0.0:8080").await?;
+let options = Options::new();
+let secret = KeySecret::generate();
+let peers = Peers::new()?;
+
+let engine = Engine::start(&context, socket, options, &secret, peers)?;
+```
+
+### recv_message
+
+Listens for the next incoming message on the given engine.
+
+```rust
+pub async fn recv_message(&self) -> crate::Result<Option<Message>>
+```
+
+#### Returns
+
+<ParamField body="return" type="Result<Option<Message>>">
+  Returns `Some(Message)` when a message is received, `None` when the engine is shutting down, or an `Error` if an error occurs.
+</ParamField>
+
+The `Message` enum can be one of:
+- `Message::Event(Event)` - A consensus event that has been ordered
+- `Message::SyncPoint(SyncPoint)` - A synchronization point in the consensus
+
+#### Example
+
+```rust
+use tashi_vertex::{Engine, Message};
+
+while let Some(message) = engine.recv_message().await? {
+    match message {
+        Message::Event(event) => {
+            // Process consensus event
+            println!("Received event");
+        }
+        Message::SyncPoint(sync_point) => {
+            // Handle synchronization point
+            println!("Reached sync point");
+        }
+    }
+}
+```
+
+<Note>
+  This method is asynchronous and will await the next message. It's typically called in a loop to continuously process messages.
+</Note>
+
+### send_transaction
+
+Sends a transaction to the network.
+
+```rust
+pub fn send_transaction(&self, transaction: Transaction) -> crate::Result<()>
+```
+
+#### Parameters
+
+<ParamField body="transaction" type="Transaction" required>
+  The transaction to send. Ownership is transferred to the engine.
+</ParamField>
+
+#### Returns
+
+<ParamField body="return" type="Result<()>">
+  Returns `Ok(())` on success, or an `Error` if the transaction fails to send.
+</ParamField>
+
+#### Example
+
+```rust
+use tashi_vertex::{Engine, Transaction};
+
+// Allocate a transaction buffer
+let mut transaction = Transaction::allocate(1024);
+
+// Write data to the transaction
+transaction[0..5].copy_from_slice(b"hello");
+
+// Send the transaction
+engine.send_transaction(transaction)?;
+```
+
+<Warning>
+  The transaction ownership is transferred to the engine. Do not use the transaction after calling `send_transaction()`.
+</Warning>
+
+## Complete usage example
+
+<Tabs>
+  <Tab title="Basic setup">
+    ```rust
+    use tashi_vertex::{
+        Context, Socket, Options, KeySecret, Peers, Engine, Message
+    };
+
+    // Initialize context
+    let context = Context::new()?;
+
+    // Bind socket
+    let socket = Socket::bind(&context, "0.0.0.0:8080").await?;
+
+    // Configure options
+    let mut options = Options::new();
+    options.set_heartbeat_us(500_000);
+
+    // Generate keys
+    let secret = KeySecret::generate();
+
+    // Create peer set
+    let mut peers = Peers::new()?;
+    // Add peers as needed
+
+    // Start engine
+    let engine = Engine::start(&context, socket, options, &secret, peers)?;
+
+    // Process messages
+    while let Some(message) = engine.recv_message().await? {
+        match message {
+            Message::Event(event) => { /* handle event */ }
+            Message::SyncPoint(sync_point) => { /* handle sync */ }
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="With transactions">
+    ```rust
+    use tashi_vertex::{Engine, Transaction, Message};
+
+    // Start engine (see Basic setup)
+    let engine = /* ... */;
+
+    // Spawn task to send transactions
+    tokio::spawn({
+        let engine = engine.clone();
+        async move {
+            loop {
+                let mut tx = Transaction::allocate(1024);
+                // Fill transaction with data
+                engine.send_transaction(tx)?;
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    });
+
+    // Main loop to receive messages
+    while let Some(message) = engine.recv_message().await? {
+        match message {
+            Message::Event(event) => {
+                println!("Received event with transactions");
+            }
+            Message::SyncPoint(sync_point) => {
+                println!("Sync point reached");
+            }
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Related types
+
+- [Context](/api/context) - Required to start the engine
+- [Socket](/api/socket) - Network socket transferred to the engine
+- [Options](/api/options) - Configuration options transferred to the engine
+- [KeySecret](/api/key-secret) - Secret key for signing operations
+- [Peers](/api/peers) - Peer set transferred to the engine
+- [Transaction](/api/transaction) - Transactions to send to the network
+- [Message](/api/message) - Messages received from the engine
+- [Event](/api/event) - Consensus events
+- [SyncPoint](/api/sync-point) - Synchronization points

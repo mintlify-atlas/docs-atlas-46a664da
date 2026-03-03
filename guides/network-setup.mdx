@@ -1,0 +1,366 @@
+---
+title: Network setup
+description: Configure peers, manage network topology, and set peer capabilities in your Tashi Vertex network
+---
+
+This guide covers how to configure and manage the peer network for Tashi Vertex consensus.
+
+## Understanding peers
+
+In Tashi Vertex, a peer represents a node in the consensus network. Each peer is identified by:
+
+- A network address (IPv4 or IPv6 with port)
+- A public key for signature verification
+- Optional capabilities that define their role
+
+## Creating a peer set
+
+The `Peers` structure manages a unique set of nodes in your network.
+
+### Initialize an empty set
+
+```rust
+use tashi_vertex::Peers;
+
+let mut peers = Peers::new()?;
+```
+
+### Initialize with capacity
+
+For better performance, pre-allocate capacity if you know the network size:
+
+```rust
+let expected_peers = 10;
+let mut peers = Peers::with_capacity(expected_peers)?;
+```
+
+## Adding peers
+
+Use the `insert` method to add nodes to the network:
+
+```rust
+use tashi_vertex::{Peers, KeyPublic};
+
+let mut peers = Peers::new()?;
+
+// Parse the peer's public key
+let peer_key: KeyPublic = "base58_public_key_here".parse()?;
+
+// Add the peer
+peers.insert(
+    "192.168.1.100:8000",
+    &peer_key,
+    Default::default()
+)?;
+```
+
+<Warning>
+Addresses must be valid IPv4 or IPv6 addresses including port numbers. DNS lookups are **not** performed.
+</Warning>
+
+### Valid address formats
+
+<CodeGroup>
+```rust IPv4
+peers.insert("10.0.0.5:8000", &peer_key, Default::default())?;
+peers.insert("192.168.1.100:9000", &peer_key, Default::default())?;
+```
+
+```rust IPv6
+peers.insert("[::1]:8000", &peer_key, Default::default())?;
+peers.insert("[2001:db8::1]:8000", &peer_key, Default::default())?;
+```
+
+```rust Bind addresses
+// Bind to all interfaces
+peers.insert("0.0.0.0:8000", &my_key.public(), Default::default())?;
+peers.insert("[::]:8000", &my_key.public(), Default::default())?;
+```
+</CodeGroup>
+
+## Adding yourself
+
+Include your own node in the peer set:
+
+```rust
+use tashi_vertex::KeySecret;
+
+let my_key: KeySecret = std::env::var("NODE_KEY")?.parse()?;
+
+// Add yourself to the peer set
+peers.insert(
+    "0.0.0.0:8000",
+    &my_key.public(),
+    Default::default()
+)?;
+```
+
+## Peer capabilities
+
+Peer capabilities define how a node participates in consensus. Configure them using the `PeerCapabilities` structure.
+
+### Available capabilities
+
+```rust
+pub struct PeerCapabilities {
+    /// Peer does not contribute to determining the finalized order of events
+    pub no_order: bool,
+    
+    /// Peer does not know application logic
+    pub no_logic: bool,
+    
+    /// Peer is marked as having a stable public address (not behind NAT)
+    pub public: bool,
+    
+    /// Peer cannot be kicked from the session
+    pub unkickable: bool,
+}
+```
+
+### Default capabilities
+
+By default, all capabilities are `false`:
+
+```rust
+let default_caps = PeerCapabilities::default();
+// no_order: false
+// no_logic: false  
+// public: false
+// unkickable: false
+```
+
+### Setting capabilities
+
+<CodeGroup>
+```rust Observer node
+use tashi_vertex::PeerCapabilities;
+
+// Node that observes but doesn't participate in ordering
+let observer = PeerCapabilities {
+    no_order: true,
+    no_logic: false,
+    public: false,
+    unkickable: false,
+};
+
+peers.insert("192.168.1.50:8000", &observer_key, observer)?;
+```
+
+```rust Public node
+// Node with stable public IP (not behind NAT)
+let public_node = PeerCapabilities {
+    no_order: false,
+    no_logic: false,
+    public: true,
+    unkickable: false,
+};
+
+peers.insert("203.0.113.10:8000", &public_key, public_node)?;
+```
+
+```rust Core validator
+// Critical node that cannot be kicked
+let core_validator = PeerCapabilities {
+    no_order: false,
+    no_logic: false,
+    public: true,
+    unkickable: true,
+};
+
+peers.insert("203.0.113.20:8000", &validator_key, core_validator)?;
+```
+
+```rust Lightweight node
+// Node without application logic
+let lightweight = PeerCapabilities {
+    no_order: false,
+    no_logic: true,
+    public: false,
+    unkickable: false,
+};
+
+peers.insert("10.0.0.30:8000", &light_key, lightweight)?;
+```
+</CodeGroup>
+
+## Network topologies
+
+### Fully connected network
+
+All nodes connect to all other nodes:
+
+```rust
+let mut peers = Peers::with_capacity(4)?;
+
+// Node 1
+let key1: KeyPublic = "key1_base58".parse()?;
+peers.insert("10.0.0.1:8000", &key1, Default::default())?;
+
+// Node 2
+let key2: KeyPublic = "key2_base58".parse()?;
+peers.insert("10.0.0.2:8000", &key2, Default::default())?;
+
+// Node 3
+let key3: KeyPublic = "key3_base58".parse()?;
+peers.insert("10.0.0.3:8000", &key3, Default::default())?;
+
+// Add yourself
+peers.insert("10.0.0.4:8000", &my_key.public(), Default::default())?;
+```
+
+### Hub-and-spoke with public nodes
+
+Public nodes act as connection hubs for nodes behind NAT:
+
+```rust
+let mut peers = Peers::with_capacity(5)?;
+
+// Public hub nodes
+let hub1: KeyPublic = "hub1_key".parse()?;
+let hub_caps = PeerCapabilities {
+    public: true,
+    unkickable: true,
+    ..Default::default()
+};
+peers.insert("203.0.113.10:8000", &hub1, hub_caps)?;
+
+let hub2: KeyPublic = "hub2_key".parse()?;
+peers.insert("203.0.113.20:8000", &hub2, hub_caps)?;
+
+// Private nodes
+let node1: KeyPublic = "node1_key".parse()?;
+peers.insert("10.0.0.1:8000", &node1, Default::default())?;
+
+let node2: KeyPublic = "node2_key".parse()?;
+peers.insert("10.0.0.2:8000", &node2, Default::default())?;
+
+// Yourself
+peers.insert("10.0.0.3:8000", &my_key.public(), Default::default())?;
+```
+
+<Note>
+When `set_enable_hole_punching(true)` is enabled (default), Tashi Vertex will attempt to establish direct connections between nodes behind NATs using UDP hole punching.
+</Note>
+
+### Observer network
+
+Include read-only observer nodes:
+
+```rust
+let mut peers = Peers::with_capacity(6)?;
+
+// Consensus participants
+for i in 1..=4 {
+    let key: KeyPublic = format!("validator{}_key", i).parse()?;
+    peers.insert(
+        &format!("10.0.0.{}:8000", i),
+        &key,
+        Default::default()
+    )?;
+}
+
+// Observers (no ordering)
+let observer_caps = PeerCapabilities {
+    no_order: true,
+    ..Default::default()
+};
+
+let obs1: KeyPublic = "observer1_key".parse()?;
+peers.insert("10.0.1.1:8000", &obs1, observer_caps)?;
+
+let obs2: KeyPublic = "observer2_key".parse()?;
+peers.insert("10.0.1.2:8000", &obs2, observer_caps)?;
+```
+
+## Parsing peers from command line
+
+For dynamic peer configuration, parse from command-line arguments:
+
+```rust
+use std::str::FromStr;
+use anyhow::anyhow;
+use tashi_vertex::{KeyPublic, Peers};
+
+#[derive(Debug, Clone)]
+struct PeerArg {
+    pub address: String,
+    pub public: KeyPublic,
+}
+
+impl FromStr for PeerArg {
+    type Err = anyhow::Error;
+    
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (public, address) = s
+            .split_once('@')
+            .ok_or_else(|| anyhow!("Invalid peer format, expected <public_key>@<address>"))?;
+        
+        let public = public.parse()?;
+        let address = address.to_string();
+        
+        Ok(PeerArg { address, public })
+    }
+}
+
+// Usage with clap
+use clap::Parser;
+
+#[derive(Parser)]
+struct Args {
+    #[clap(short = 'P')]
+    pub peers: Vec<PeerArg>,
+}
+
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    
+    let mut peers = Peers::with_capacity(args.peers.len())?;
+    
+    for peer in &args.peers {
+        peers.insert(&peer.address, &peer.public, Default::default())?;
+    }
+    
+    Ok(())
+}
+```
+
+Run with:
+
+```bash
+cargo run -- \
+  -P "base58_key1@192.168.1.100:8000" \
+  -P "base58_key2@192.168.1.101:8000" \
+  -P "base58_key3@192.168.1.102:8000"
+```
+
+## Best practices
+
+<Steps>
+  <Step title="Use capacity hints">
+    Initialize `Peers` with `with_capacity()` when you know the network size to reduce allocations.
+  </Step>
+  
+  <Step title="Mark public nodes">
+    Set `public: true` for nodes with stable public IPs to improve hole punching success.
+  </Step>
+  
+  <Step title="Protect core validators">
+    Use `unkickable: true` for critical validators to prevent them from being voted out.
+  </Step>
+  
+  <Step title="Use observers for monitoring">
+    Deploy observer nodes with `no_order: true` for monitoring without affecting consensus.
+  </Step>
+  
+  <Step title="Include yourself">
+    Always add your own node to the peer set with the correct bind address.
+  </Step>
+</Steps>
+
+## Next steps
+
+<Accordion title="Related configuration">
+- Configure hole punching with `set_enable_hole_punching()` in [Configuration](/guides/configuration)
+- Set fallen behind kick thresholds with `set_fallen_behind_kick_s()`
+- Enable dynamic epoch sizing for network changes
+</Accordion>
