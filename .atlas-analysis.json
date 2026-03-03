@@ -1,0 +1,128 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Tashi Vertex Rust SDK",
+  "projectDescription": "Rust bindings for Tashi Vertex, an embedded Byzantine fault-tolerant consensus engine based on the Hashgraph algorithm",
+  "theme": "aspen",
+  "primaryColor": "#8B5CF6",
+  "lightColor": "#A78BFA",
+  "darkColor": "#6D28D9",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/consensus",
+              "concepts/architecture",
+              "concepts/events-and-transactions"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/running-a-node",
+              "guides/network-setup",
+              "guides/configuration",
+              "guides/key-management"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/key-generation",
+              "examples/pingback-network",
+              "examples/transaction-handling"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Types",
+            "pages": [
+              "api/engine",
+              "api/context",
+              "api/socket",
+              "api/options"
+            ]
+          },
+          {
+            "group": "Networking",
+            "pages": [
+              "api/peers",
+              "api/peer-capabilities"
+            ]
+          },
+          {
+            "group": "Consensus",
+            "pages": [
+              "api/message",
+              "api/event",
+              "api/transaction",
+              "api/sync-point"
+            ]
+          },
+          {
+            "group": "Cryptography",
+            "pages": [
+              "api/key-secret",
+              "api/key-public",
+              "api/base58"
+            ]
+          },
+          {
+            "group": "Error Handling",
+            "pages": [
+              "api/error"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Fast BFT consensus with sub-100ms finality",
+    "Async-first Rust API with Future-based operations",
+    "Zero runtime dependencies with safe FFI",
+    "Configurable engine parameters",
+    "Base58 key encoding utilities",
+    "Peer capability management",
+    "DAG-based event ordering"
+  ],
+  "publicApiSurface": [
+    "Engine::start",
+    "Engine::recv_message",
+    "Engine::send_transaction",
+    "Context::new",
+    "Socket::bind",
+    "Options::new",
+    "Options::set_heartbeat_us",
+    "Options::set_target_ack_latency_ms",
+    "Options::set_enable_dynamic_epoch_size",
+    "Peers::new",
+    "Peers::insert",
+    "KeySecret::generate",
+    "KeySecret::public",
+    "KeyPublic::from_str",
+    "Transaction::allocate",
+    "Event::transactions",
+    "Event::creator",
+    "Event::consensus_at",
+    "Message::Event",
+    "Message::SyncPoint",
+    "base58::encode",
+    "base58::decode"
+  ]
+}
